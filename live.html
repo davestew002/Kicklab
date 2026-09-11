@@ -5,18 +5,18 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"/>
 <title>KICKLAB LIVE</title>
 <style>
-  :root{--lime:#c8ff3d;--pink:#ff2ec8;--dim:#8b93a7;--txt:#f4f6fb}
+  :root{--lime:#c8ff3d;--pink:#ff2ec8;--txt:#f4f6fb}
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;height:100%;background:#05070c;color:var(--txt);font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;overflow:hidden;touch-action:none}
-  #stage{position:fixed;inset:0}
+  #stage{position:fixed;inset:0;z-index:1;touch-action:none}
   video,canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
-  canvas{z-index:2} video{z-index:1;transform:scaleX(-1)}
+  video{z-index:1;transform:scaleX(-1)}
+  canvas{z-index:2}
   #hud{position:fixed;inset:0;z-index:3;pointer-events:none}
-  #stage{z-index:1;touch-action:none}
   #hud *{pointer-events:auto}
   .top{position:absolute;top:calc(6px + env(safe-area-inset-top));left:10px;right:10px}
   .brand{letter-spacing:.28em;font-size:10px;color:var(--lime);font-weight:700}
-  .panel{background:rgba(8,10,16,.8);border:1px solid #2a3348;border-radius:14px;padding:8px 10px;margin-top:6px;backdrop-filter:blur(10px);max-width:52vw}
+  .panel{background:rgba(8,10,16,.8);border:1px solid #2a3348;border-radius:14px;padding:8px 10px;margin-top:6px;backdrop-filter:blur(10px);max-width:56vw}
   .row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px}
   select,button{border:0;border-radius:10px;padding:8px 10px;font:inherit;font-weight:800}
   select{background:#0c0f16;color:var(--txt);border:1px solid #2a3348;font-weight:600}
@@ -26,16 +26,20 @@
   .mphwrap{position:absolute;right:14px;bottom:calc(10px + env(safe-area-inset-bottom));text-align:right;pointer-events:none}
   .mph{font-size:84px;font-weight:800;letter-spacing:-.06em;line-height:.85;text-shadow:0 8px 30px #000}
   .mph span{font-size:16px;color:var(--lime);margin-left:6px}
-  .arrow{font-size:90px;line-height:.65}.up{color:#7dff6a}.down{color:#ff4d4d}.same{color:#e6c35a}
+  .arrow{font-size:90px;line-height:.65}
+  .up{color:#7dff6a}.down{color:#ff4d4d}.same{color:#e6c35a}
   .sub{color:#d7dce8;font-size:13px}
 </style>
 </head>
 <body>
-<div id="stage"><video id="vid" playsinline muted autoplay></video><canvas id="cv"></canvas></div>
+<div id="stage">
+  <video id="vid" playsinline muted autoplay></video>
+  <canvas id="cv"></canvas>
+</div>
 <div id="hud">
   <div class="top">
     <div class="brand">KICKLAB LIVE</div>
-    <div class="panel" id="cal">
+    <div class="panel">
       <div class="row">
         <select id="size"><option value="0.205" selected>Size 4</option></select>
         <button class="ghost" id="cam">START CAMERA</button>
@@ -45,274 +49,370 @@
       <div class="prompt" id="prompt">START CAMERA · put the ball in the pink ring</div>
     </div>
   </div>
-  <div class="mphwrap" id="readout">
+  <div class="mphwrap">
     <div class="arrow same" id="arrow">→</div>
     <div class="mph" id="mph">—<span>MPH</span></div>
-    <div class="sub" id="meta">Speed from frames · 2-FT ring is the ruler</div>
+    <div class="sub" id="meta">Size 4 ball is the ruler</div>
   </div>
 </div>
 <script>
-const vid=$("vid"), cv=$("cv"), ctx=cv.getContext("2d",{willReadFrequently:true});
-function $(id){return document.getElementById(id)}
+const $ = id => document.getElementById(id);
+const vid = $("vid");
+const cv = $("cv");
+const ctx = cv.getContext("2d", { willReadFrequently: true });
+
+const BALL_FT = 0.673;          // size 4 diameter in feet
+const RING_R  = 0.042;          // ring radius as fraction of frame width
+const PINK    = "#ff2ec8";
+
+const S = {
+  live: false,
+  phase: "off",                 // off | seek | mark | fly | done
+  cx: 0.74, cy: 0.68, r: RING_R,
+  gx: 0.22,
+  drag: false,
+  quietUntil: 0,
+  lastY: 0,
+  still: 0,
+  mark: null,                   // {x,y,d,t} ball at rest
+  ball: null,                   // last seen {x,y,d}
+  path: [],                     // flight samples {t,x,y}
+  lastMph: null,
+  flyStart: 0
+};
+
+const analyze = document.createElement("canvas");
+const actx = analyze.getContext("2d", { willReadFrequently: true });
+
+function resize(){
+  cv.width  = innerWidth  * devicePixelRatio;
+  cv.height = innerHeight * devicePixelRatio;
+}
+addEventListener("resize", resize);
+resize();
+
+function say(t){ $("prompt").textContent = t; }
+
+function resetSeek(){
+  S.phase = S.live ? "seek" : "off";
+  S.still = 0;
+  S.mark = null;
+  S.ball = null;
+  S.path = [];
+  S.flyStart = 0;
+  $("lock").className = "ghost";
+}
 
 function drawCover(c, video, W, H, mirror){
-  const vw=video.videoWidth, vh=video.videoHeight;
-  if(!vw) return;
-  const scale=Math.max(W/vw, H/vh);
-  const dw=vw*scale, dh=vh*scale;
-  const ox=(W-dw)/2, oy=(H-dh)/2;
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw) return;
+  const scale = Math.max(W / vw, H / vh);
+  const dw = vw * scale, dh = vh * scale;
+  const ox = (W - dw) / 2, oy = (H - dh) / 2;
   c.save();
-  if(mirror){ c.translate(W,0); c.scale(-1,1); c.drawImage(video, W-ox-dw, oy, dw, dh); }
-  else c.drawImage(video, ox, oy, dw, dh);
+  if (mirror){
+    c.translate(W, 0);
+    c.scale(-1, 1);
+    c.drawImage(video, W - ox - dw, oy, dw, dh);
+  } else {
+    c.drawImage(video, ox, oy, dw, dh);
+  }
   c.restore();
 }
 
-const PINK="#ff2ec8";
-const state={live:false,locked:false,cx:0.74,cy:0.68,r:0.042,gx:0.22,drag:null,lastMph:null,track:[],ready:false,prevData:null,lock:null,flying:false,vx:0,vy:0};
-function resize(){cv.width=innerWidth*devicePixelRatio;cv.height=innerHeight*devicePixelRatio}
-addEventListener("resize",resize); resize();
-function prompt(t){$("prompt").textContent=t}
-
 async function startCam(){
-  const s=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:"user",width:{ideal:1280},height:{ideal:720},frameRate:{ideal:60}}});
-  vid.srcObject=s; await vid.play(); state.live=true; prompt("Place the ball inside the pink ring"); loop();
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: false,
+    video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60 } }
+  });
+  vid.srcObject = stream;
+  await vid.play();
+  S.live = true;
+  S.phase = "seek";
+  say("Place the ball in the pink ring and hold still");
+  loop();
 }
 
-function toNorm(ev){const r=cv.getBoundingClientRect();return {x:(ev.clientX-r.left)/r.width,y:(ev.clientY-r.top)/r.height}}
+function toNorm(ev){
+  const r = cv.getBoundingClientRect();
+  return { x: (ev.clientX - r.left) / r.width, y: (ev.clientY - r.top) / r.height };
+}
+function nearRing(p){
+  return Math.hypot(p.x - S.cx, (p.y - S.cy) * 0.6) < S.r * 4;
+}
 function onDown(ev){
-  if(ev.target.closest && ev.target.closest(".panel")) return;
-  const p=toNorm(ev);
-  state.drag="ring";
-  state.py=p.y;
+  if (ev.target.closest && ev.target.closest(".panel")) return;
+  const p = toNorm(ev.touches ? ev.touches[0] : ev);
+  if (!nearRing(p)) return;
+  S.drag = true;
+  S.lastY = p.y;
+  S.phase = "seek";
+  S.still = 0;
+  S.mark = null;
+  S.path = [];
 }
 function onMove(ev){
-  if(state.drag!=="ring") return;
+  if (!S.drag) return;
   ev.preventDefault();
-  const p=toNorm(ev);
-  state.cy += p.y-state.py;
-  state.cy=Math.min(0.92, Math.max(0.18, state.cy));
-  state.py=p.y;
+  const p = toNorm(ev.touches ? ev.touches[0] : ev);
+  S.cy = Math.min(0.92, Math.max(0.18, S.cy + (p.y - S.lastY)));
+  S.lastY = p.y;
 }
-function onUp(){ state.drag=null; }
-document.addEventListener("pointerdown", onDown, {passive:false});
-document.addEventListener("pointermove", onMove, {passive:false});
+function onUp(){
+  if (!S.drag) return;
+  S.drag = false;
+  S.quietUntil = performance.now() + 700;
+  S.phase = "seek";
+  say("Ring set — ball in the ring, hold still");
+}
+document.addEventListener("pointerdown", onDown, { passive: false });
+document.addEventListener("pointermove", onMove, { passive: false });
 document.addEventListener("pointerup", onUp);
-document.addEventListener("touchstart", e=>{
-  if(e.target.closest && e.target.closest(".panel")) return;
-  const p=toNorm(e.touches[0]); state.drag="ring"; state.py=p.y;
-}, {passive:false});
-document.addEventListener("touchmove", e=>{
-  if(state.drag!=="ring") return;
-  e.preventDefault();
-  const p=toNorm(e.touches[0]);
-  state.cy += p.y-state.py;
-  state.cy=Math.min(0.92, Math.max(0.18, state.cy));
-  state.py=p.y;
-}, {passive:false});
+document.addEventListener("touchstart", onDown, { passive: false });
+document.addEventListener("touchmove", onMove, { passive: false });
 document.addEventListener("touchend", onUp);
 
-function isBallPix(r,g,b){
-  const grass=g>r+8 && g>b+6 && g>60 && g<200;
-  if(grass) return false;
-  return true;
+function isBallPix(r, g, b){
+  const grass = g > r + 8 && g > b + 6 && g > 60 && g < 200;
+  return !grass;
 }
-function blobIn(img, cx,cy, rad){
-  const w=img.width,h=img.height,data=img.data;
-  const x0=Math.max(1,(cx-rad)*w|0), x1=Math.min(w-1,(cx+rad)*w|0);
-  const y0=Math.max(1,(cy-rad)*h|0), y1=Math.min(h-1,(cy+rad)*h|0);
-  let sx=0,sy=0,n=0,minx=w,maxx=0,miny=h,maxy=0,tot=0;
-  for(let y=y0;y<y1;y+=1){
-    for(let x=x0;x<x1;x+=1){
-      if(Math.hypot(x-cx*w, y-cy*h)>rad*w) continue;
-      tot++;
-      const i=(y*w+x)*4;
-      if(!isBallPix(data[i],data[i+1],data[i+2])) continue;
-      sx+=x;sy+=y;n++;
-      if(x<minx)minx=x;if(x>maxx)maxx=x;if(y<miny)miny=y;if(y>maxy)maxy=y;
+
+function blobIn(img, cx, cy, rad){
+  const w = img.width, h = img.height, data = img.data;
+  const x0 = Math.max(1, (cx - rad) * w | 0);
+  const x1 = Math.min(w - 1, (cx + rad) * w | 0);
+  const y0 = Math.max(1, (cy - rad) * h | 0);
+  const y1 = Math.min(h - 1, (cy + rad) * h | 0);
+  let sx = 0, sy = 0, n = 0, minx = w, maxx = 0, miny = h, maxy = 0;
+  for (let y = y0; y < y1; y++){
+    for (let x = x0; x < x1; x++){
+      if (Math.hypot(x - cx * w, y - cy * h) > rad * w) continue;
+      const i = (y * w + x) * 4;
+      if (!isBallPix(data[i], data[i + 1], data[i + 2])) continue;
+      sx += x; sy += y; n++;
+      if (x < minx) minx = x; if (x > maxx) maxx = x;
+      if (y < miny) miny = y; if (y > maxy) maxy = y;
     }
   }
-  if(n<8) return null;
-  const d=Math.max(4, Math.max(maxx-minx,maxy-miny));
-  return {x:sx/n/w,y:sy/n/h,d:d/w,n,tot};
+  if (n < 10) return null;
+  return {
+    x: sx / n / w,
+    y: sy / n / h,
+    d: Math.max(4, Math.max(maxx - minx, maxy - miny)) / w
+  };
 }
+
+function inRing(p){
+  return Math.hypot(p.x - S.cx, p.y - S.cy) < S.r * 1.25;
+}
+
 function findBall(img){
-  if(state.flying && state.lock){
-    const px=state.lock.x+(state.vx||0)*1.4;
-    const py=state.lock.y+(state.vy||0)*1.4;
-    let near=blobIn(img, px, py, 0.14);
-    if(near && Math.abs(near.x-state.gx)>0.05) return near;
-    const mid=(state.lock.x+state.gx)/2;
-    near=blobIn(img, mid, state.lock.y, 0.18);
-    if(near) return near;
+  if (S.phase === "fly" && S.ball){
+    const hit = blobIn(img, S.ball.x, S.ball.y, 0.16);
+    if (hit && Math.abs(hit.x - S.gx) > 0.04) return hit;
     return null;
   }
-  const inR=blobIn(img, state.cx, state.cy, state.r*1.2);
-  if(inR) return Object.assign(inR,{inRing:true});
-  return null;
+  return blobIn(img, S.cx, S.cy, S.r * 1.25);
 }
-function inRing(p){return Math.hypot(p.x-state.cx,p.y-state.cy)<state.r*1.2}
 
-function draw(hit){
-  const w=cv.width,h=cv.height;
-  ctx.clearRect(0,0,w,h);
-  ctx.strokeStyle=PINK; ctx.fillStyle=PINK;
-  ctx.lineWidth=4*devicePixelRatio;
-  ctx.strokeStyle=state.ready? "#ff2a2a":PINK;
-  ctx.fillStyle=ctx.strokeStyle;
-  ctx.setLineDash([14*devicePixelRatio,10*devicePixelRatio]);
-  ctx.beginPath(); ctx.arc(state.cx*w,state.cy*h,state.r*w,0,Math.PI*2); ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.font=(12*devicePixelRatio)+"px sans-serif";
-  ctx.fillText("2 FT BALL", state.cx*w-36, state.cy*h-state.r*w-8);
-  ctx.lineWidth=5*devicePixelRatio;
-  ctx.beginPath(); ctx.moveTo(state.gx*w,0); ctx.lineTo(state.gx*w,h); ctx.stroke();
-  ctx.fillText("GATE", state.gx*w+8, 28*devicePixelRatio);
-  const L=state.lock||hit;
-  if(L){
-    ctx.beginPath(); ctx.strokeStyle=state.ready?"#ff2a2a":"#7dff6a"; ctx.lineWidth=4*devicePixelRatio;
-    const rr=Math.min(state.r*w*0.85, Math.max(8*devicePixelRatio, (L.d||0.03)*w*0.5));
-    ctx.arc(L.x*w,L.y*h,rr,0,Math.PI*2); ctx.stroke();
+function feetPerNorm(){
+  const d = (S.mark && S.mark.d) || (S.ball && S.ball.d) || (S.r * 1.1);
+  return BALL_FT / Math.max(d, 0.014);
+}
+
+function publish(mph){
+  mph = Math.round(mph);
+  $("mph").innerHTML = mph + "<span>MPH</span>";
+  const el = $("arrow");
+  if (S.lastMph == null){ el.textContent = "→"; el.className = "arrow same"; }
+  else if (mph > S.lastMph + 1){ el.textContent = "↑"; el.className = "arrow up"; }
+  else if (mph < S.lastMph - 1){ el.textContent = "↓"; el.className = "arrow down"; }
+  else { el.textContent = "→"; el.className = "arrow same"; }
+  $("meta").textContent = "Peak frames · size 4 ball is the ruler";
+  S.lastMph = mph;
+  say(mph + " MPH · put the ball back in the ring");
+  S.phase = "done";
+  S.path = [];
+}
+
+function speedFromPath(){
+  const tr = S.path;
+  if (tr.length < 2) return false;
+  const toward = S.gx - S.cx;
+  const aspect = innerHeight / innerWidth;
+  const fpp = feetPerNorm();
+  let best = 0;
+  for (let i = 0; i < tr.length - 1; i++){
+    const a = tr[i], b = tr[i + 1];
+    const dt = b.t - a.t;
+    if (dt < 0.018 || dt > 0.12) continue;
+    const dx = b.x - a.x, dy = b.y - a.y;
+    if (toward !== 0 && dx * toward <= 0) continue;
+    const mph = (Math.hypot(dx, dy * aspect) * fpp / dt) * 0.681818;
+    if (mph > best) best = mph;
   }
-}
-
-function flash(mph){
-  $("mph").innerHTML=mph.toFixed(0)+"<span>MPH</span>";
-  const prev=state.lastMph, el=$("arrow");
-  if(prev==null){el.textContent="→";el.className="arrow same"}
-  else if(mph>prev+0.7){el.textContent="↑";el.className="arrow up"}
-  else if(mph<prev-0.7){el.textContent="↓";el.className="arrow down"}
-  else {el.textContent="→";el.className="arrow same"}
-  $("meta").textContent="Peak frames · size 4 ball is the ruler";
-  state.lastMph=mph;
-}
-
-function ballFeet(){
-  const d=state.lock && state.lock.d ? state.lock.d : state.r*1.1;
-  const ballFt=0.673;
-  return ballFt/Math.max(d,0.012);
-}
-function speedFromTrack(){
-  const tr=state.track;
-  if(tr.length<2) return;
-  const toward=state.gx-state.cx;
-  const aspect=innerHeight/innerWidth;
-  const fpp=ballFeet();
-  let best=0;
-  for(let i=0;i<tr.length-1;i++){
-    const a=tr[i], b=tr[i+1];
-    const dt=b.t-a.t;
-    if(dt<0.02||dt>0.12) continue;
-    const dx=b.x-a.x, dy=b.y-a.y;
-    if(toward!==0 && dx*toward<=0) continue;
-    const distN=Math.hypot(dx, dy*aspect);
-    const feet=distN*fpp;
-    const mph=(feet/dt)*0.681818;
-    if(mph>best) best=mph;
-  }
-  const a=tr[0], b=tr[Math.min(tr.length-1, 4)];
-  const dt=b.t-a.t;
-  if(dt>=0.04 && dt<=0.20){
-    const dx=b.x-a.x, dy=b.y-a.y;
-    if(!(toward!==0 && dx*toward<=0)){
-      const mph=(Math.hypot(dx,dy*aspect)*fpp/dt)*0.681818;
-      if(mph>best) best=mph;
+  if (tr.length >= 3){
+    const a = tr[0], b = tr[Math.min(tr.length - 1, 4)];
+    const dt = b.t - a.t;
+    if (dt >= 0.04 && dt <= 0.22){
+      const dx = b.x - a.x, dy = b.y - a.y;
+      if (!(toward !== 0 && dx * toward <= 0)){
+        const mph = (Math.hypot(dx, dy * aspect) * fpp / dt) * 0.681818;
+        if (mph > best) best = mph;
+      }
     }
   }
-  if(best>=8&&best<=80){
-    flash(best);
-    prompt(best.toFixed(0)+" MPH · ball back in the ring");
-    state.track=[]; state.ready=false; state.lock=null; state.flying=false; state.vx=0; state.vy=0;
+  if (best >= 10 && best <= 80){
+    publish(best);
+    return true;
+  }
+  return false;
+}
+
+function beginFly(t, x, y){
+  S.phase = "fly";
+  S.flyStart = t;
+  S.path = [];
+  if (S.mark) S.path.push({ t: S.mark.t || t, x: S.mark.x, y: S.mark.y });
+  S.path.push({ t, x, y });
+  say("KICK — left the mark");
+}
+
+function draw(hit){
+  const w = cv.width, h = cv.height;
+  ctx.clearRect(0, 0, w, h);
+  const armed = S.phase === "mark" || S.phase === "fly";
+  ctx.strokeStyle = armed ? "#ff2a2a" : PINK;
+  ctx.fillStyle = ctx.strokeStyle;
+  ctx.lineWidth = 4 * devicePixelRatio;
+  ctx.setLineDash([14 * devicePixelRatio, 10 * devicePixelRatio]);
+  ctx.beginPath();
+  ctx.arc(S.cx * w, S.cy * h, S.r * w, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.font = (12 * devicePixelRatio) + "px sans-serif";
+  ctx.fillText("SIZE 4", S.cx * w - 24, S.cy * h - S.r * w - 8);
+  ctx.lineWidth = 5 * devicePixelRatio;
+  ctx.beginPath();
+  ctx.moveTo(S.gx * w, 0);
+  ctx.lineTo(S.gx * w, h);
+  ctx.stroke();
+  ctx.fillText("GATE", S.gx * w + 8, 28 * devicePixelRatio);
+  const L = hit || S.ball;
+  if (L){
+    ctx.strokeStyle = armed ? "#ff2a2a" : "#7dff6a";
+    ctx.lineWidth = 4 * devicePixelRatio;
+    const rr = Math.min(S.r * w * 0.8, Math.max(8 * devicePixelRatio, (L.d || 0.03) * w * 0.5));
+    ctx.beginPath();
+    ctx.arc(L.x * w, L.y * h, rr, 0, Math.PI * 2);
+    ctx.stroke();
   }
 }
 
 function loop(){
-  if(!state.live) return;
-  if(vid.videoWidth){
-    const tw=640, th=Math.round(640*cv.height/cv.width);
-    const off=document.createElement("canvas"); off.width=tw; off.height=th;
-    const o=off.getContext("2d",{willReadFrequently:true});
-    drawCover(o, vid, tw, th, true);
-    const frame=o.getImageData(0,0,tw,th);
-    const hit=findBall(frame);
-    state.prevData=frame.data;
-    const t=performance.now()/1000;
-    if(hit){
-      if(state.lock){
-        state.vx=hit.x-state.lock.x;
-        state.vy=hit.y-state.lock.y;
-      }
-      state.lock={x:hit.x,y:hit.y,d:hit.d};
-      const inside=inRing(hit);
-      if(inside && !state.flying){
-        state.seen=(state.seen||0)+1;
-        if(state.seen>2){
-          state.locked=true; state.ready=true; state.flying=false; state.track=[];
-          $("lock").className="go";
-          prompt("LOCKED ON BALL — kick");
-        } else {
-          prompt("Ball in ring — locking…");
-        }
-      } else if(state.ready && !inside){
-        const toward=state.gx-state.cx;
-        if(toward===0 || (hit.x-state.cx)*toward<=0) { /* ignore motion away from gate */ }
-        else {
-          state.flying=true;
-          state.track.push({t,x:hit.x,y:hit.y});
-          prompt("TRACKING");
-          if(state.track.length>=3) speedFromTrack();
-          if(state.track[0] && t-state.track[0].t>0.40){
-            state.track=[]; state.flying=false; state.ready=true;
-            prompt("LOCKED ON BALL — kick again");
-          }
-        }
-      }
-      state.missT=null;
-    } else {
-      state.seen=0;
-      if(state.ready){
-        if(!state.flying){
-          state.flying=true;
-          if(state.lock) state.track.push({t,x:state.lock.x,y:state.lock.y});
-          prompt("TRACKING");
-        }
-        if(state.lock){
-          state.track.push({t,x:state.lock.x+(state.vx||0),y:state.lock.y+(state.vy||0)});
-          if(state.track.length>=2) speedFromTrack();
-        }
-        if(!state.missT) state.missT=t;
-        if(t-state.missT>0.25){
-          if(state.track.length>=2) speedFromTrack();
-          if(state.ready){
-            const fpp=ballFeet();
-            const dt=1/30;
-            const mph=(Math.hypot(state.vx||0,(state.vy||0)*(innerHeight/innerWidth))*fpp/dt)*0.681818;
-            if(mph>=12&&mph<=75) flash(mph);
-            prompt((state.lastMph?state.lastMph.toFixed(0)+" MPH · ":"")+"ball back in the ring");
-          }
-          state.flying=false; state.track=[]; state.missT=null;
-          state.lock=null; state.ready=false; state.vx=0; state.vy=0;
-        }
-      } else if(state.live){
-        prompt("Looking for the ball in the ring…");
-      }
+  if (!S.live) return;
+  if (vid.videoWidth){
+    const tw = 640, th = Math.round(640 * cv.height / cv.width);
+    if (analyze.width !== tw || analyze.height !== th){
+      analyze.width = tw; analyze.height = th;
     }
-    draw(hit || state.lock);
-  } else draw(null);
+    drawCover(actx, vid, tw, th, true);
+    const frame = actx.getImageData(0, 0, tw, th);
+    const hit = findBall(frame);
+    const t = performance.now() / 1000;
+    const quiet = S.drag || performance.now() < S.quietUntil;
+
+    if (quiet){
+      draw(hit);
+      requestAnimationFrame(loop);
+      return;
+    }
+
+    if (S.phase === "done"){
+      if (hit && inRing(hit)){
+        S.phase = "seek";
+        S.still = 0;
+        S.ball = hit;
+        say("Ball in ring — hold still");
+      }
+      draw(hit);
+      requestAnimationFrame(loop);
+      return;
+    }
+
+    if (S.phase === "fly"){
+      if (hit){
+        S.ball = hit;
+        S.path.push({ t, x: hit.x, y: hit.y });
+        if (speedFromPath()) { draw(hit); requestAnimationFrame(loop); return; }
+      }
+      if (t - S.flyStart > 0.35){
+        if (!speedFromPath()){
+          say("Missed the flight — ball back in the ring");
+          S.phase = "done";
+        }
+      }
+      draw(hit || S.ball);
+      requestAnimationFrame(loop);
+      return;
+    }
+
+    // seek or mark
+    if (hit && inRing(hit)){
+      const prev = S.ball;
+      const jump = prev ? Math.hypot(hit.x - prev.x, hit.y - prev.y) : 0;
+      S.ball = hit;
+
+      if (S.phase === "mark" && S.mark && Math.hypot(hit.x - S.mark.x, hit.y - S.mark.y) > S.r * 0.65){
+        beginFly(t, hit.x, hit.y);
+        speedFromPath();
+      } else if (jump < 0.01){
+        S.still++;
+        if (S.still >= 8){
+          S.mark = { x: hit.x, y: hit.y, d: hit.d, t };
+          S.phase = "mark";
+          $("lock").className = "go";
+          say("ON THE MARK — kick when ready");
+        } else {
+          S.phase = "seek";
+          say("Ball in ring — hold still…");
+        }
+      } else {
+        S.still = Math.max(0, S.still - 2);
+        S.phase = "seek";
+        say("Ball in ring — hold still…");
+      }
+    } else if (S.phase === "mark"){
+      const x = S.ball ? S.ball.x : S.cx;
+      const y = S.ball ? S.ball.y : S.cy;
+      beginFly(t, x, y);
+    } else {
+      S.still = 0;
+      S.ball = hit;
+      say("Looking for the ball in the ring…");
+    }
+    draw(hit || S.ball);
+  } else {
+    draw(null);
+  }
   requestAnimationFrame(loop);
 }
 
-$("cam").onclick=()=>startCam().catch(()=>alert("Allow camera"));
-$("lock").onclick=()=>{
-  const go=()=>{
-    state.locked=true; state.ready=true; state.seen=99;
-    $("lock").className="go";
-    prompt("LOCKED — sensor is live. Kick.");
+$("cam").onclick = () => startCam().catch(() => alert("Allow camera"));
+$("lock").onclick = () => {
+  const arm = () => {
+    if (S.ball) S.mark = { x: S.ball.x, y: S.ball.y, d: S.ball.d, t: performance.now() / 1000 };
+    else S.mark = { x: S.cx, y: S.cy, d: S.r * 1.1, t: performance.now() / 1000 };
+    S.phase = "mark";
+    S.still = 99;
+    $("lock").className = "go";
+    say("ON THE MARK — kick when ready");
   };
-  if(!state.live) startCam().then(go); else go();
+  if (!S.live) startCam().then(arm); else arm();
 };
-$("unlock").onclick=()=>{
-  state.locked=false; state.ready=false; state.track=[]; state.lock=null; state.flying=false;
-  prompt("RECALIBRATE — drag ring and gate, then LOCK");
+$("unlock").onclick = () => {
+  resetSeek();
+  say("RECALIBRATE — drag the ring onto the ball");
 };
 </script>
 </body>
