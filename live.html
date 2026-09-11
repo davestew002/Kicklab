@@ -184,15 +184,22 @@ function flash(mph){
 
 function speedFromTrack(){
   const tr=state.track;
-  if(tr.length<3) return;
+  if(tr.length<4) return;
   const a=tr[0], b=tr[tr.length-1];
   const dt=b.t-a.t;
-  if(dt<0.06||dt>0.22) return;
+  if(dt<0.07||dt>0.28) return;
   const dx=b.x-a.x, dy=b.y-a.y;
+  const toward= (state.gx-state.cx);
+  if(toward===0 || dx*toward<=0) return;
   const distN=Math.hypot(dx, dy*(innerHeight/innerWidth));
   const feet=distN/Math.max(state.r,0.02);
+  if(feet<2.2) return;
   const mph=(feet/dt)*0.681818;
-  if(mph>=8&&mph<=80){ flash(mph); prompt(mph.toFixed(0)+" MPH · put the ball back in the ring"); state.track=[]; state.ready=false; state.lock=null; state.flying=false; state.vx=0; state.vy=0; }
+  if(mph>=10&&mph<=80){
+    flash(mph);
+    prompt(mph.toFixed(0)+" MPH · put the ball back in the ring");
+    state.track=[]; state.ready=false; state.lock=null; state.flying=false; state.vx=0; state.vy=0;
+  }
 }
 
 function loop(){
@@ -222,14 +229,18 @@ function loop(){
         } else {
           prompt("Ball in ring — locking…");
         }
-      } else if(state.ready){
-        state.flying=true;
-        state.track.push({t,x:hit.x,y:hit.y});
-        prompt("TRACKING");
-        if(state.track.length>=3) speedFromTrack();
-        if(state.track[0] && t-state.track[0].t>0.30){
-          state.track=[]; state.flying=false; state.ready=true;
-          prompt("LOCKED ON BALL — kick again");
+      } else if(state.ready && Math.abs(hit.x-state.cx)>state.r*0.9){
+        const toward=state.gx-state.cx;
+        if(toward===0 || (hit.x-state.cx)*toward<=0) { /* ignore motion away from gate */ }
+        else {
+          state.flying=true;
+          state.track.push({t,x:hit.x,y:hit.y});
+          prompt("TRACKING");
+          if(state.track.length>=4) speedFromTrack();
+          if(state.track[0] && t-state.track[0].t>0.32){
+            state.track=[]; state.flying=false; state.ready=true;
+            prompt("LOCKED ON BALL — kick again");
+          }
         }
       }
       state.missT=null;
