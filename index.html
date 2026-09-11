@@ -8,8 +8,8 @@
   :root{--bg:#07080d;--card:#10131c;--line:#1e2433;--lime:#c8ff3d;--dim:#8b93a7;--txt:#f4f6fb;--warn:#e6c35a}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--txt);font-family:ui-sans-serif,system-ui,-apple-system,sans-serif}
-  .wrap{max-width:760px;margin:0 auto;padding:22px 16px 70px}
-  h1{letter-spacing:.22em;font-size:13px;color:var(--lime);margin:0}
+  .wrap{max-width:760px;margin:0 auto;padding:22px 16px 80px}
+  h1{letter-spacing:.26em;font-size:13px;color:var(--lime);margin:0}
   .sub{color:var(--dim);font-size:13px;margin:8px 0 18px;line-height:1.45}
   .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin:12px 0}
   label{display:block;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin:10px 0 6px}
@@ -17,13 +17,13 @@
   button{background:var(--lime);color:#111;font-weight:800;letter-spacing:.08em;border:0;margin-top:12px}
   button:disabled{opacity:.5}
   video,canvas{width:100%;max-height:240px;object-fit:contain;border-radius:12px;background:#000;display:block;margin-top:10px}
-  .mph{font-size:64px;font-weight:800;letter-spacing:-.04em;line-height:.9}
-  .mph span{font-size:18px;color:var(--dim);margin-left:8px}
+  .mph{font-size:68px;font-weight:800;letter-spacing:-.04em;line-height:.9}
+  .mph span{font-size:16px;color:var(--dim);margin-left:8px}
   .grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:12px}
   .tile{background:#0c0f16;border:1px solid var(--line);border-radius:12px;padding:10px}
   .k{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
   .v{font-size:20px;font-weight:800;margin-top:4px}
-  .warn{color:var(--warn);font-size:13px;line-height:1.45;border:1px solid #c9a227;border-radius:10px;padding:10px;margin:10px 0}
+  .warn{color:var(--warn);font-size:13px;border:1px solid #c9a227;border-radius:10px;padding:10px;margin:10px 0}
   .log{color:var(--dim);font-size:13px;line-height:1.4}
   .bar{height:12px;background:#0c0f16;border:1px solid var(--line);border-radius:99px;overflow:hidden;margin:10px 0}
   .bar>i{display:block;height:100%;width:0;background:var(--lime)}
@@ -33,7 +33,7 @@
 <body>
 <div class="wrap">
   <h1>KICKLAB</h1>
-  <p class="sub">Yellow-green + white. Ignores the spare ball by the pad. Plays the clip once and tracks the ball that actually flies.</p>
+  <p class="sub">New engine. It does not paint grass. It only keeps a small circle that suddenly shoots right — that’s the ball, any color.</p>
   <div class="card">
     <label>Video</label>
     <input id="file" type="file" accept="video/*"/>
@@ -74,56 +74,6 @@ function setStatus(p,msg){
 }
 function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
-function isTarget(r,g,b){
-  const yellowGreen = g>110 && r>70 && b<150 && g+r>220 && g>b+20;
-  const white = r>175 && g>165 && b>145 && Math.abs(r-g)<45;
-  return yellowGreen || white;
-}
-
-function findBlobs(img){
-  const w=img.width,h=img.height,data=img.data;
-  const xMax=Math.floor(w*0.72);
-  const y0=Math.floor(h*0.20), y1=Math.floor(h*0.78);
-  const gw=Math.ceil(xMax/10), gh=Math.ceil((y1-y0)/10);
-  const acc=new Int16Array(gw*gh);
-  for(let y=y0;y<y1;y+=2){
-    for(let x=0;x<xMax;x+=2){
-      const i=(y*w+x)*4;
-      if(isTarget(data[i],data[i+1],data[i+2])){
-        acc[Math.floor((y-y0)/10)*gw + Math.floor(x/10)]++;
-      }
-    }
-  }
-  const blobs=[];
-  const used=new Uint8Array(acc.length);
-  for(let k=0;k<8;k++){
-    let best=0,bi=-1;
-    for(let i=0;i<acc.length;i++) if(!used[i] && acc[i]>best){best=acc[i];bi=i;}
-    if(best<8) break;
-    const bx=bi%gw, by=Math.floor(bi/gw);
-    for(let yy=by-1;yy<=by+1;yy++) for(let xx=bx-1;xx<=bx+1;xx++){
-      if(yy>=0&&yy<gh&&xx>=0&&xx<gw) used[yy*gw+xx]=1;
-    }
-    const cx0=bx*10, cy0=y0+by*10;
-    let sx=0,sy=0,n=0,minx=w,maxx=0,miny=h,maxy=0;
-    for(let y=Math.max(y0,cy0-22);y<Math.min(y1,cy0+28);y++){
-      for(let x=Math.max(0,cx0-22);x<Math.min(xMax,cx0+28);x++){
-        const i=(y*w+x)*4;
-        if(isTarget(data[i],data[i+1],data[i+2])){
-          sx+=x;sy+=y;n++;
-          if(x<minx)minx=x; if(x>maxx)maxx=x;
-          if(y<miny)miny=y; if(y>maxy)maxy=y;
-        }
-      }
-    }
-    if(n<10) continue;
-    const d=Math.max(maxx-minx,maxy-miny);
-    if(d<6||d>70) continue;
-    blobs.push({x:sx/n,y:sy/n,d,n});
-  }
-  return blobs;
-}
-
 function snap(){
   if(!vid.videoWidth) return null;
   const W=480;
@@ -133,36 +83,106 @@ function snap(){
   return ctx.getImageData(0,0,cv.width,cv.height);
 }
 
-function finishCard(track){
-  if(track.length<2){
-    $("warn").innerHTML='<div class="warn">No flight lock. Chat card for this clip is still 38 mph / 11°.</div>';
+function motionBlobs(prev, curr){
+  if(!prev||!curr) return [];
+  const w=curr.width,h=curr.height,a=prev.data,b=curr.data;
+  const x1=Math.floor(w*0.78), y0=Math.floor(h*0.22), y1=Math.floor(h*0.78);
+  const gw=Math.ceil(x1/8), gh=Math.ceil((y1-y0)/8);
+  const acc=new Int16Array(gw*gh);
+  for(let y=y0;y<y1;y+=2){
+    for(let x=0;x<x1;x+=2){
+      const i=(y*w+x)*4;
+      const d=Math.abs(a[i]-b[i])+Math.abs(a[i+1]-b[i+1])+Math.abs(a[i+2]-b[i+2]);
+      if(d>110) acc[Math.floor((y-y0)/8)*gw+Math.floor(x/8)]++;
+    }
+  }
+  const out=[];
+  const used=new Uint8Array(acc.length);
+  for(let k=0;k<6;k++){
+    let best=0,bi=-1;
+    for(let i=0;i<acc.length;i++) if(!used[i]&&acc[i]>best){best=acc[i];bi=i;}
+    if(best<6) break;
+    const bx=bi%gw, by=Math.floor(bi/gw);
+    for(let yy=by-1;yy<=by+1;yy++) for(let xx=bx-1;xx<=bx+1;xx++){
+      if(yy>=0&&yy<gh&&xx>=0&&xx<gw) used[yy*gw+xx]=1;
+    }
+    const cx=bx*8+4, cy=y0+by*8+4;
+    let sx=0,sy=0,n=0,minx=w,maxx=0,miny=h,maxy=0;
+    for(let y=Math.max(y0,cy-20);y<Math.min(y1,cy+22);y++){
+      for(let x=Math.max(0,cx-20);x<Math.min(x1,cx+22);x++){
+        const i=(y*w+x)*4;
+        const d=Math.abs(a[i]-b[i])+Math.abs(a[i+1]-b[i+1])+Math.abs(a[i+2]-b[i+2]);
+        if(d>110){
+          sx+=x;sy+=y;n++;
+          if(x<minx)minx=x; if(x>maxx)maxx=x;
+          if(y<miny)miny=y; if(y>maxy)maxy=y;
+        }
+      }
+    }
+    if(n<8) continue;
+    const bw=maxx-minx,bh=maxy-miny,d=Math.max(bw,bh);
+    if(d<8||d>36) continue;
+    const ratio=Math.max(bw,1)/Math.max(bh,1);
+    if(ratio>1.7||ratio<0.55) continue;
+    out.push({x:sx/n,y:sy/n,d});
+  }
+  return out;
+}
+
+function scoreTracks(points){
+  const tracks=[];
+  points.forEach(p=>{
+    let best=-1,bestd=1e9;
+    for(let i=0;i<tracks.length;i++){
+      const last=tracks[i][tracks[i].length-1];
+      if(p.t-last.t>0.18) continue;
+      const dist=Math.hypot(p.x-last.x,p.y-last.y);
+      if(dist<bestd && dist<90){ bestd=dist; best=i; }
+    }
+    if(best>=0) tracks[best].push(p);
+    else tracks.push([p]);
+  });
+  let winner=null, winV=-1;
+  tracks.forEach(tr=>{
+    if(tr.length<3) return;
+    for(let i=0;i<tr.length;i++){
+      for(let j=i+1;j<tr.length;j++){
+        const dt=tr[j].t-tr[i].t;
+        if(dt<0.05||dt>0.18) continue;
+        const dx=tr[j].x-tr[i].x;
+        if(dx<25) continue;
+        const v=dx/dt;
+        if(v>winV){ winV=v; winner=tr.slice(i,j+1); }
+      }
+    }
+  });
+  return winner;
+}
+
+function finish(win){
+  if(!win||win.length<2){
+    $("warn").innerHTML='<div class="warn">No fast small circle. Chat card for IMG_4690 is 38 mph / 11°.</div>';
     setStatus(100,"No lock"); return;
   }
-  let i0=0,best=0;
-  for(let i=1;i<track.length;i++){
-    const dx=track[i].x-track[i-1].x;
-    const dt=Math.max(0.01,track[i].t-track[i-1].t);
-    const v=dx/dt;
-    if(v>best && dx>5){ best=v; i0=i-1; }
-  }
-  const tHit=track[i0].t;
-  let use=track.filter(p=>p.t>=tHit && p.t<=tHit+0.16);
-  if(use.length<2) use=track.slice(i0,Math.min(track.length,i0+5));
-  const a=use[0],b=use[use.length-1];
-  const dt=Math.max(0.03,b.t-a.t);
+  const a=win[0], b=win[win.length-1];
+  const dt=Math.max(0.05,b.t-a.t);
   const dist=Math.hypot(b.x-a.x,b.y-a.y);
-  const diam=use.map(p=>p.d).sort((x,y)=>x-y)[Math.floor(use.length/2)];
+  const diam=win.map(p=>p.d).sort((x,y)=>x-y)[Math.floor(win.length/2)];
   const mpp=parseFloat($("ball").value)/Math.max(diam,1);
   const speed=(dist*mpp)/dt;
   const mph=speed*2.236936;
   const ang=Math.atan2(a.y-b.y,Math.abs(b.x-a.x))*180/Math.PI;
+  win.forEach(p=>{
+    ctx.beginPath(); ctx.strokeStyle="#c8ff3d"; ctx.lineWidth=2;
+    ctx.arc(p.x,p.y,Math.max(5,p.d/2),0,Math.PI*2); ctx.stroke();
+  });
   $("out").style.display="block";
   $("mph").innerHTML=mph.toFixed(0)+"<span>MPH</span>";
   $("units").textContent=(speed*3.6).toFixed(0)+" KM/H · "+speed.toFixed(1)+" M/S";
   $("ang").textContent=ang.toFixed(1)+"°";
   $("bpx").textContent=diam.toFixed(0)+" px";
   $("win").textContent=dt.toFixed(2)+"s";
-  $("detail").textContent="Flight lock · contact ~ "+tHit.toFixed(2)+"s · "+use.length+" samples · "+track.length+" points.";
+  $("detail").textContent="Fast circle · "+a.t.toFixed(2)+"–"+b.t.toFixed(2)+"s · "+win.length+" hits. Trust only if circles sit on the flying ball.";
   setStatus(100,"Done");
 }
 
@@ -178,56 +198,30 @@ $("go").onclick=async()=>{
   running=true; $("go").disabled=true; $("out").style.display="none"; $("warn").innerHTML="";
   if(vid.readyState<1) await new Promise(r=>{vid.onloadedmetadata=r; setTimeout(r,2500);});
   const dur=vid.duration||0;
-  setStatus(6,(vid.videoWidth||"?")+"x"+(vid.videoHeight||"?")+" · playing");
   vid.muted=true; vid.playbackRate=1; vid.currentTime=0;
   try{ await vid.play(); }catch(e){
-    $("warn").innerHTML='<div class="warn">Tap the video play button once, then tap READ THE KICK again.</div>';
-    running=false; $("go").disabled=false; setStatus(8,"Play blocked"); return;
+    $("warn").innerHTML='<div class="warn">Tap play on the video, then tap READ THE KICK.</div>';
+    running=false; $("go").disabled=false; return;
   }
-  const samples=[];
-  let lastT=-1;
+  const points=[]; let prev=null; let lastT=-1;
   const t0=performance.now();
   while(!vid.ended && (vid.currentTime||0)<Math.min(dur,8)){
     const t=vid.currentTime||0;
     if(t-lastT>=0.04){
       lastT=t;
-      setStatus(8+85*(t/Math.max(dur,0.1)), "Playing "+t.toFixed(2)+"s · samples "+samples.length);
+      setStatus(8+85*(t/Math.max(dur,.1)), "Playing "+t.toFixed(2)+"s · movers "+points.length);
       const img=snap();
       if(img){
-        const blobs=findBlobs(img);
-        blobs.forEach(b=>samples.push({t,...b}));
-        blobs.forEach(b=>{
-          ctx.beginPath(); ctx.strokeStyle="#c8ff3d"; ctx.lineWidth=2;
-          ctx.arc(b.x,b.y,Math.max(5,b.d/2),0,Math.PI*2); ctx.stroke();
-        });
+        motionBlobs(prev,img).forEach(b=>points.push({t,...b}));
+        prev=img;
       }
     }
     if(performance.now()-t0>12000) break;
-    if(performance.now()-t0>1500 && t<0.05) break;
+    if(performance.now()-t0>1600 && t<0.05) break;
     await sleep(25);
   }
   vid.pause();
-  samples.sort((a,b)=>a.t-b.t);
-  const track=[];
-  for(const s of samples){
-    if(!track.length){ track.push(s); continue; }
-    const prev=track[track.length-1];
-    if(s.t<=prev.t+0.001) continue;
-    const dist=Math.hypot(s.x-prev.x,s.y-prev.y);
-    if(s.x>=prev.x-8 && dist<120) track.push(s);
-    else if(s.x>prev.x+10) track.push(s);
-  }
-  if(track.length<3){
-    const byT={};
-    samples.forEach(s=>{ (byT[s.t.toFixed(2)]=byT[s.t.toFixed(2)]||[]).push(s); });
-    const times=Object.keys(byT).map(Number).sort((a,b)=>a-b);
-    const path=[];
-    times.forEach(t=>{
-      const blob=byT[t.toFixed(2)][0];
-      if(!path.length || blob.x>=path[path.length-1].x-5) path.push({t,...blob});
-    });
-    finishCard(path);
-  } else finishCard(track);
+  finish(scoreTracks(points));
   running=false; $("go").disabled=false;
 };
 </script>
