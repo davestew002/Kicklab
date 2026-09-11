@@ -7,7 +7,7 @@
 <style>
   :root{--lime:#c8ff3d;--pink:#ff2ec8;--dim:#8b93a7;--txt:#f4f6fb}
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-  html,body{margin:0;height:100%;background:#05070c;color:var(--txt);font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;overflow:hidden}
+  html,body{margin:0;height:100%;background:#05070c;color:var(--txt);font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;overflow:hidden;touch-action:none}
   #stage{position:fixed;inset:0}
   video,canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
   canvas{z-index:2} video{z-index:1;transform:scaleX(-1)}
@@ -66,24 +66,37 @@ async function startCam(){
 }
 
 function toNorm(ev){const r=cv.getBoundingClientRect();return {x:(ev.clientX-r.left)/r.width,y:(ev.clientY-r.top)/r.height}}
-const stage=$("stage");
-stage.style.touchAction="none";
-cv.style.pointerEvents="auto";
-stage.addEventListener("pointerdown",ev=>{
+function onDown(ev){
+  if(ev.target.closest && ev.target.closest(".panel")) return;
   const p=toNorm(ev);
-  const dist=Math.hypot(p.x-state.cx,p.y-state.cy);
-  if(dist<state.r*2.8 || Math.abs(dist-state.r)<0.08) state.drag="ring";
-  else state.drag=null;
+  state.drag="ring";
   state.py=p.y;
-});
-stage.addEventListener("pointermove",ev=>{
+}
+function onMove(ev){
   if(state.drag!=="ring") return;
+  ev.preventDefault();
   const p=toNorm(ev);
   state.cy += p.y-state.py;
   state.cy=Math.min(0.92, Math.max(0.18, state.cy));
   state.py=p.y;
-});
-addEventListener("pointerup",()=>state.drag=null);
+}
+function onUp(){ state.drag=null; }
+document.addEventListener("pointerdown", onDown, {passive:false});
+document.addEventListener("pointermove", onMove, {passive:false});
+document.addEventListener("pointerup", onUp);
+document.addEventListener("touchstart", e=>{
+  if(e.target.closest && e.target.closest(".panel")) return;
+  const p=toNorm(e.touches[0]); state.drag="ring"; state.py=p.y;
+}, {passive:false});
+document.addEventListener("touchmove", e=>{
+  if(state.drag!=="ring") return;
+  e.preventDefault();
+  const p=toNorm(e.touches[0]);
+  state.cy += p.y-state.py;
+  state.cy=Math.min(0.92, Math.max(0.18, state.cy));
+  state.py=p.y;
+}, {passive:false});
+document.addEventListener("touchend", onUp);
 
 function isBallPix(r,g,b){
   const bright=r>145&&g>140&&b>110;
