@@ -33,7 +33,7 @@
 <body>
 <div class="wrap">
   <h1>KICKLAB</h1>
-  <p class="sub">Pick a clip, tap the green button. No kick time. The bar must move. If play is blocked, it steps through the file instead.</p>
+  <p class="sub">Any color soccer ball. The page watches what moves and treats that as the ball. Size-4 diameter is the ruler.</p>
   <div class="card">
     <label>Video</label>
     <input id="file" type="file" accept="video/*"/>
@@ -65,39 +65,15 @@
 </div>
 <script>
 const $ = id => document.getElementById(id);
-const vid = $("vid"), cv = $("cv"), ctx = cv.getContext("2d", {willReadFrequently:true});
+const vid=$("vid"), cv=$("cv"), ctx=cv.getContext("2d",{willReadFrequently:true});
 let running=false;
 
-function setStatus(p, msg){
-  $("fill").style.width = Math.max(0,Math.min(100,p)) + "%";
-  $("pct").textContent = Math.round(Math.max(0,Math.min(100,p))) + "%";
-  $("meta").textContent = msg;
+function setStatus(p,msg){
+  $("fill").style.width=Math.max(0,Math.min(100,p))+"%";
+  $("pct").textContent=Math.round(Math.max(0,Math.min(100,p)))+"%";
+  $("meta").textContent=msg;
 }
 function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
-function isLime(r,g,b){ return g>135 && g>r+16 && g>b+22 && r>40 && b<170; }
-
-function findBall(img, last){
-  const w=img.width,h=img.height,data=img.data;
-  let sx=0,sy=0,n=0,minx=w,maxx=0,miny=h,maxy=0;
-  const x0=last?Math.max(0,last.x-80):0;
-  const x1=last?Math.min(w,last.x+90):w;
-  const y0=last?Math.max(0,last.y-80):Math.floor(h*0.2);
-  const y1=last?Math.min(h,last.y+80):Math.floor(h*0.9);
-  for(let y=y0;y<y1;y+=2){
-    for(let x=x0;x<x1;x+=2){
-      const i=(y*w+x)*4;
-      if(isLime(data[i],data[i+1],data[i+2])){
-        sx+=x;sy+=y;n++;
-        if(x<minx)minx=x; if(x>maxx)maxx=x;
-        if(y<miny)miny=y; if(y>maxy)maxy=y;
-      }
-    }
-  }
-  if(n<8) return null;
-  const d=Math.max(maxx-minx,maxy-miny);
-  if(d<4||d>120) return null;
-  return {x:sx/n,y:sy/n,d,n};
-}
 
 function snap(){
   if(!vid.videoWidth) return null;
@@ -108,11 +84,64 @@ function snap(){
   return ctx.getImageData(0,0,cv.width,cv.height);
 }
 
+function motionBall(prev, curr, last){
+  if(!prev||!curr) return null;
+  const w=curr.width,h=curr.height;
+  const a=prev.data,b=curr.data;
+  const x0=last?Math.max(0,last.x-90):Math.floor(w*0.02);
+  const x1=last?Math.min(w,last.x+110):Math.floor(w*0.78);
+  const y0=last?Math.max(0,last.y-90):Math.floor(h*0.22);
+  const y1=last?Math.min(h,last.y+90):Math.floor(h*0.78);
+  let sx=0,sy=0,n=0,minx=w,maxx=0,miny=h,maxy=0;
+  for(let y=y0;y<y1;y+=2){
+    for(let x=x0;x<x1;x+=2){
+      const i=(y*w+x)*4;
+      const d=Math.abs(a[i]-b[i])+Math.abs(a[i+1]-b[i+1])+Math.abs(a[i+2]-b[i+2]);
+      if(d>90){
+        sx+=x;sy+=y;n++;
+        if(x<minx)minx=x; if(x>maxx)maxx=x;
+        if(y<miny)miny=y; if(y>maxy)maxy=y;
+      }
+    }
+  }
+  if(n<10) return null;
+  const bw=maxx-minx, bh=maxy-miny, d=Math.max(bw,bh);
+  if(d<6||d>90) return null;
+  const ratio=Math.max(bw,1)/Math.max(bh,1);
+  if(ratio>2.4||ratio<0.4) return null;
+  return {x:sx/n,y:sy/n,d,n};
+}
+
+function colorBall(img,last){
+  const w=img.width,h=img.height,data=img.data;
+  const x0=last?Math.max(0,last.x-80):0;
+  const x1=last?Math.min(w,last.x+90):Math.floor(w*0.8);
+  const y0=last?Math.max(0,last.y-80):Math.floor(h*0.22);
+  const y1=last?Math.min(h,last.y+80):Math.floor(h*0.8);
+  let sx=0,sy=0,n=0,minx=w,maxx=0,miny=h,maxy=0;
+  for(let y=y0;y<y1;y+=2){
+    for(let x=x0;x<x1;x+=2){
+      const i=(y*w+x)*4,r=data[i],g=data[i+1],b=data[i+2];
+      const lime=g>135&&g>r+16&&g>b+22&&r>40&&b<170;
+      const white=r>175&&g>165&&b>145&&Math.abs(r-g)<40;
+      const orange=r>160&&r>g+25&&r>b+10&&g>70;
+      if(lime||white||orange){
+        sx+=x;sy+=y;n++;
+        if(x<minx)minx=x; if(x>maxx)maxx=x;
+        if(y<miny)miny=y; if(y>maxy)maxy=y;
+      }
+    }
+  }
+  if(n<8) return null;
+  const d=Math.max(maxx-minx,maxy-miny);
+  if(d<5||d>100) return null;
+  return {x:sx/n,y:sy/n,d,n};
+}
+
 function finishCard(track){
   if(track.length<2){
-    $("warn").innerHTML='<div class="warn">No lime ball lock. Neon ball only. White ball clips: send them in chat.</div>';
-    setStatus(100,"No lock");
-    return;
+    $("warn").innerHTML='<div class="warn">Could not lock a moving ball. Side-on, ball fully in frame, phone still.</div>';
+    setStatus(100,"No lock"); return;
   }
   let i0=0,best=0;
   for(let i=1;i<track.length;i++){
@@ -123,29 +152,29 @@ function finishCard(track){
   }
   const tHit=track[i0].t;
   let use=track.filter(p=>p.t>=tHit && p.t<=tHit+0.18);
-  if(use.length<2) use=track.slice(i0, Math.min(track.length,i0+5));
-  const a=use[0], b=use[use.length-1];
+  if(use.length<2) use=track.slice(i0,Math.min(track.length,i0+5));
+  const a=use[0],b=use[use.length-1];
   const dt=Math.max(0.03,b.t-a.t);
   const dist=Math.hypot(b.x-a.x,b.y-a.y);
   const diam=use.map(p=>p.d).sort((x,y)=>x-y)[Math.floor(use.length/2)];
   const mpp=parseFloat($("ball").value)/Math.max(diam,1);
   const speed=(dist*mpp)/dt;
   const mph=speed*2.236936;
-  const ang=Math.atan2(a.y-b.y, Math.abs(b.x-a.x))*180/Math.PI;
+  const ang=Math.atan2(a.y-b.y,Math.abs(b.x-a.x))*180/Math.PI;
   $("out").style.display="block";
   $("mph").innerHTML=mph.toFixed(0)+"<span>MPH</span>";
   $("units").textContent=(speed*3.6).toFixed(0)+" KM/H · "+speed.toFixed(1)+" M/S";
   $("ang").textContent=ang.toFixed(1)+"°";
   $("bpx").textContent=diam.toFixed(0)+" px";
   $("win").textContent=dt.toFixed(2)+"s";
-  $("detail").textContent="Auto contact ~ "+tHit.toFixed(2)+"s · "+use.length+" samples · "+track.length+" locks.";
+  $("detail").textContent="Any-color lock · contact ~ "+tHit.toFixed(2)+"s · "+use.length+" samples.";
   setStatus(100,"Done");
 }
 
 function seekTo(t){
   return new Promise(res=>{
     let done=false;
-    const fin=()=>{ if(done) return; done=true; vid.removeEventListener("seeked",fin); res(); };
+    const fin=()=>{ if(done)return; done=true; vid.removeEventListener("seeked",fin); res(); };
     vid.addEventListener("seeked",fin);
     vid.currentTime=Math.min(Math.max(0,t), Math.max(0,(vid.duration||t)-0.01));
     setTimeout(fin,700);
@@ -153,21 +182,19 @@ function seekTo(t){
 }
 
 async function stepScan(dur){
-  const cap=Math.min(dur||3, 8);
-  const step=0.08;
+  const cap=Math.min(dur||3,8);
+  const step=0.07;
   const times=[];
   for(let t=0;t<cap;t+=step) times.push(+t.toFixed(3));
-  const track=[]; let last=null;
+  const track=[]; let last=null; let prev=null;
   for(let i=0;i<times.length;i++){
-    setStatus(10+80*(i/times.length), "Stepping "+(i+1)+" / "+times.length+" at "+times[i].toFixed(2)+"s");
-    await seekTo(times[i]);
-    await sleep(0);
-    const img=snap();
-    if(!img) continue;
-    const hit=findBall(img,last);
+    setStatus(10+80*(i/times.length),"Stepping "+(i+1)+" / "+times.length+" at "+times[i].toFixed(2)+"s");
+    await seekTo(times[i]); await sleep(0);
+    const img=snap(); if(!img) continue;
+    let hit=motionBall(prev,img,last) || colorBall(img,last);
+    prev=img;
     if(hit){
-      last=hit;
-      track.push({t:times[i],...hit});
+      last=hit; track.push({t:times[i],...hit});
       ctx.beginPath(); ctx.strokeStyle="#c8ff3d"; ctx.lineWidth=2;
       ctx.arc(hit.x,hit.y,Math.max(4,hit.d/2),0,Math.PI*2); ctx.stroke();
     }
@@ -176,68 +203,54 @@ async function stepScan(dur){
 }
 
 async function playScan(dur){
-  const track=[]; let last=null; let lastT=-1;
-  vid.pause();
-  vid.currentTime=0;
-  vid.muted=true;
-  vid.playbackRate=1;
+  const track=[]; let last=null; let prev=null; let lastT=-1;
+  vid.pause(); vid.currentTime=0; vid.muted=true; vid.playbackRate=1;
   try{ await vid.play(); }catch(e){ return null; }
   const t0=performance.now();
   while(true){
     const t=vid.currentTime||0;
     if(t-lastT>=0.04){
       lastT=t;
-      setStatus(10+80*(t/Math.max(dur,0.1)), "Playing "+t.toFixed(2)+"s / "+dur.toFixed(2)+"s");
+      setStatus(10+80*(t/Math.max(dur,0.1)),"Playing "+t.toFixed(2)+"s / "+dur.toFixed(2)+"s");
       const img=snap();
       if(img){
-        const hit=findBall(img,last);
+        let hit=motionBall(prev,img,last) || colorBall(img,last);
+        prev=img;
         if(hit){
-          last=hit;
-          track.push({t,...hit});
+          last=hit; track.push({t,...hit});
           ctx.beginPath(); ctx.strokeStyle="#c8ff3d"; ctx.lineWidth=2;
           ctx.arc(hit.x,hit.y,Math.max(4,hit.d/2),0,Math.PI*2); ctx.stroke();
         }
       }
     }
-    if(t>=Math.min(dur,10)-0.05) break;
-    if(vid.ended) break;
+    if(t>=Math.min(dur,10)-0.05 || vid.ended) break;
     if(performance.now()-t0>14000) break;
-    if(performance.now()-t0>1200 && t<0.05) { vid.pause(); return null; }
+    if(performance.now()-t0>1200 && t<0.05){ vid.pause(); return null; }
     await sleep(30);
   }
   vid.pause();
   return track;
 }
 
-$("file").onchange = e => {
-  const f=e.target.files[0];
-  if(!f) return;
+$("file").onchange=e=>{
+  const f=e.target.files[0]; if(!f) return;
   vid.src=URL.createObjectURL(f);
-  setStatus(2, f.name+" · "+(f.size/1e6).toFixed(1)+" MB · tap READ THE KICK");
+  setStatus(2,f.name+" · "+(f.size/1e6).toFixed(1)+" MB · tap READ THE KICK");
 };
 
-$("go").onclick = async ()=>{
+$("go").onclick=async()=>{
   if(running) return;
   if(!vid.src){ $("warn").innerHTML='<div class="warn">Pick a video first.</div>'; return; }
-  running=true;
-  $("go").disabled=true;
-  $("out").style.display="none";
-  $("warn").innerHTML="";
+  running=true; $("go").disabled=true; $("out").style.display="none"; $("warn").innerHTML="";
   setStatus(6,"Opening");
-  if(vid.readyState<1){
-    await new Promise(r=>{ vid.onloadedmetadata=r; setTimeout(r,2500); });
-  }
+  if(vid.readyState<1) await new Promise(r=>{vid.onloadedmetadata=r; setTimeout(r,2500);});
   const dur=vid.duration||0;
-  setStatus(8, (vid.videoWidth||"?")+"x"+(vid.videoHeight||"?")+" · "+dur.toFixed(2)+"s");
+  setStatus(8,(vid.videoWidth||"?")+"x"+(vid.videoHeight||"?")+" · "+dur.toFixed(2)+"s");
   let track=await playScan(dur);
-  if(!track){
-    setStatus(9,"Play blocked — stepping instead");
-    track=await stepScan(dur);
-  }
+  if(!track){ setStatus(9,"Play blocked — stepping"); track=await stepScan(dur); }
   setStatus(94,"Computing");
   finishCard(track||[]);
-  running=false;
-  $("go").disabled=false;
+  running=false; $("go").disabled=false;
 };
 </script>
 </body>
