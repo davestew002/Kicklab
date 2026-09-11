@@ -80,7 +80,8 @@ const S = {
   lastMph: null,
   flyStart: 0,
   vx: 0,
-  vy: 0
+  vy: 0,
+  miss: 0
 };
 
 const analyze = document.createElement("canvas");
@@ -175,8 +176,13 @@ document.addEventListener("touchmove", onMove, { passive: false });
 document.addEventListener("touchend", onUp);
 
 function isBallPix(r, g, b){
-  const grass = g > r + 8 && g > b + 6 && g > 60 && g < 200;
-  return !grass;
+  const grass = g > r + 12 && g > b + 8 && g > 50 && g < 210;
+  if (grass) return false;
+  const lum = (r + g + b) / 3;
+  if (lum > 145) return true;
+  if (r > 135 && r > g + 22 && r > b + 12) return true;
+  if (lum < 75 && Math.abs(r - g) < 28 && Math.abs(g - b) < 28) return true;
+  return lum > 95;
 }
 
 function blobIn(img, cx, cy, rad){
@@ -206,26 +212,38 @@ function inRing(p){
   return Math.hypot(p.x - S.cx, p.y - S.cy) < S.r * 1.25;
 }
 
+function scanLane(img, x0, x1, y){
+  const dir = x1 < x0 ? -1 : 1;
+  let best = null, bestN = 0;
+  for (let x = x0; dir < 0 ? x >= x1 : x <= x1; x += 0.05 * dir){
+    const hit = blobIn(img, x, y, 0.11);
+    if (!hit) continue;
+    if (hit.x * dir < x0 * dir - 0.01) continue;
+    const n = 1 / (Math.abs(hit.y - y) + 0.02);
+    if (n > bestN){ best = hit; bestN = n; }
+  }
+  return best;
+}
+
 function findBall(img){
   if (S.phase === "fly"){
     const ox = S.ball ? S.ball.x : S.cx;
     const oy = S.ball ? S.ball.y : S.cy;
-    const px = ox + (S.vx || -0.06);
-    const py = oy + (S.vy || 0);
-    const spots = [
-      [px, py, 0.14],
-      [ox - 0.10, oy, 0.16],
-      [ox - 0.20, oy, 0.16],
-      [(ox + S.gx) / 2, oy - 0.04, 0.18],
-      [S.gx + 0.10, oy, 0.16]
-    ];
-    for (const [x, y, r] of spots){
-      const hit = blobIn(img, x, y, r);
-      if (hit) return hit;
-    }
+    const px = Math.max(0.05, Math.min(0.95, ox + (S.vx || -0.08)));
+    const py = Math.max(0.25, Math.min(0.92, oy + (S.vy || 0.02)));
+    let hit = blobIn(img, px, py, 0.13);
+    if (hit) return hit;
+    hit = blobIn(img, ox - 0.08, oy + 0.04, 0.13);
+    if (hit) return hit;
+    hit = scanLane(img, ox, S.gx - 0.02, oy + 0.04);
+    if (hit) return hit;
+    hit = scanLane(img, ox, S.gx - 0.02, S.cy + 0.06);
+    if (hit) return hit;
+    hit = blobIn(img, S.gx + 0.06, S.cy + 0.05, 0.14);
+    if (hit) return hit;
     return null;
   }
-  return blobIn(img, S.cx, S.cy, S.r * 1.25);
+  return blobIn(img, S.cx, S.cy, S.r * 1.35);
 }
 
 function feetPerNorm(){
@@ -363,7 +381,7 @@ function loop(){
         S.path.push({ t, x: hit.x, y: hit.y });
         if (speedFromPath()) { draw(hit); requestAnimationFrame(loop); return; }
       }
-      if (t - S.flyStart > 0.50){
+      if (t - S.flyStart > 0.80){
         if (!speedFromPath()){
           say("Missed the flight — ball back in the ring");
           S.phase = "done";
@@ -378,11 +396,15 @@ function loop(){
     if (S.phase === "mark"){
       if (hit && inRing(hit)){
         S.ball = hit;
+        S.miss = 0;
         say("ON THE MARK — kick when ready");
       } else {
-        const x = hit ? hit.x : (S.mark ? S.mark.x : S.cx);
-        const y = hit ? hit.y : (S.mark ? S.mark.y : S.cy);
-        beginFly(t, x, y);
+        S.miss++;
+        if (S.miss >= 2){
+          const x = hit ? hit.x : (S.mark ? S.mark.x : S.cx);
+          const y = hit ? hit.y : (S.mark ? S.mark.y : S.cy);
+          beginFly(t, x, y);
+        }
       }
     } else if (hit && inRing(hit)){
       S.ball = hit;
