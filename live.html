@@ -68,7 +68,7 @@ const state={
   live:false, locked:false,
   cx:0.72, cy:0.62, r:0.08,
   gx:0.18, gy:0.58,
-  drag:null, lastMph:null, t0:null
+  drag:null, lastMph:null, t0:null, armed:false, last:null
 };
 const PINK="#ff2ec8";
 function resize(){
@@ -88,7 +88,7 @@ async function startCam(){
 
 function gateBox(){
   const d=state.r*2;
-  return {x:state.gx, y:state.gy, w:d*0.18, h:d*0.45};
+  return {x:state.gx, y:state.gy, w:d*0.55, h:d*1.35};
 }
 
 function toNorm(ev){
@@ -185,17 +185,29 @@ function loop(){
     off.width=tw; off.height=th;
     const o=off.getContext("2d",{willReadFrequently:true});
     o.save(); o.translate(tw,0); o.scale(-1,1); o.drawImage(vid,0,0,tw,th); o.restore();
-    const hit=state.locked? findBall(o.getImageData(0,0,tw,th)): null;
+    let hit=state.locked? findBall(o.getImageData(0,0,tw,th)): null;
     const g=gateBox();
-    const hot=hit && inGate(hit,g);
-    draw(hit,hot);
-    if(state.locked && hit){
+    if(state.locked){
       const t=performance.now()/1000;
-      if(inRing(hit)) state.t0=t;
+      if(hit && inRing(hit)){
+        state.armed=true; state.t0=t; state.last=hit;
+      } else if(!state.armed){
+        hit=null;
+      } else if(hit && state.last){
+        const toward=hit.x<=state.last.x+0.08;
+        const near=Math.hypot(hit.x-state.last.x,hit.y-state.last.y)<0.35;
+        if(!toward || !near) hit=null;
+        else state.last=hit;
+      }
+      if(state.armed && state.t0 && t-state.t0>1.2){ state.armed=false; state.t0=null; hit=null; }
+      const hot=hit && inGate(hit,g);
+      draw(hit,hot);
       if(hot && state.t0 && t-state.t0>0.04 && t-state.t0<1.2){
         const mph=(8/(t-state.t0))*0.681818;
-        if(mph>=8 && mph<=80){ flash(mph); state.t0=null; }
+        if(mph>=8 && mph<=80){ flash(mph); state.armed=false; state.t0=null; }
       }
+    } else {
+      draw(null,false);
     }
   } else draw(null,false);
   requestAnimationFrame(loop);
