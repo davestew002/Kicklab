@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>KICKLAB</title>
+<style>
+  :root{
+    --bg:#07080d; --card:#10131c; --line:#1e2433; --lime:#c8ff3d;
+    --dim:#8b93a7; --txt:#f4f6fb; --warn:#e6c35a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:ui-sans-serif,system-ui,sans-serif}
+  .wrap{max-width:760px;margin:0 auto;padding:22px 16px 60px}
+  h1{letter-spacing:.2em;font-size:13px;color:var(--lime);margin:0}
+  .sub{color:var(--dim);font-size:13px;margin:8px 0 18px;line-height:1.45}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin:12px 0}
+  label{display:block;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin:10px 0 6px}
+  input[type=file],select,button{
+    width:100%;border-radius:10px;border:1px solid var(--line);
+    background:#0c0f16;color:var(--txt);padding:12px;font-size:15px
+  }
+  button{
+    background:var(--lime);color:#111;font-weight:800;letter-spacing:.08em;
+    border:0;cursor:pointer;margin-top:12px
+  }
+  button:disabled{opacity:.45;cursor:wait}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  canvas,video{max-width:100%;border-radius:12px;background:#000}
+  video{display:none}
+  .mph{font-size:64px;font-weight:800;letter-spacing:-.04em;line-height:.9}
+  .mph span{font-size:18px;color:var(--dim);margin-left:8px}
+  .grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:12px}
+  .tile{background:#0c0f16;border:1px solid var(--line);border-radius:12px;padding:10px}
+  .k{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+  .v{font-size:20px;font-weight:800;margin-top:4px}
+  .warn{color:var(--warn);font-size:13px;line-height:1.45;border:1px solid #c9a227;border-radius:10px;padding:10px;margin:10px 0}
+  .ok{color:#b6ff7a;font-size:13px}
+  .log{color:var(--dim);font-size:12px;white-space:pre-wrap;line-height:1.4}
+  a{color:var(--lime)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>KICKLAB</h1>
+  <p class="sub">Soccer launch monitor. Size-4 ball is the ruler. Video never leaves this phone — drop a clip, get speed and launch angle.</p>
+
+  <div class="card">
+    <label>Video (original 4K 120 if you have it)</label>
+    <input id="file" type="file" accept="video/*"/>
+    <div class="row">
+      <div>
+        <label>Ball</label>
+        <select id="ball">
+          <option value="0.205" selected>Size 4 — 8.07 in / 20.5 cm</option>
+          <option value="0.191">Size 3 — 7.5 in / 19.1 cm</option>
+          <option value="0.220">Size 5 — 8.6 in / 22.0 cm</option>
+        </select>
+      </div>
+      <div>
+        <label>Status</label>
+        <div id="meta" class="log">Waiting for a clip</div>
+      </div>
+    </div>
+    <button id="go">READ THE KICK</button>
+    <div id="warn"></div>
+  </div>
+
+  <canvas id="cv" width="960" height="540"></canvas>
+  <video id="vid" playsinline muted></video>
+
+  <div class="card" id="out" style="display:none">
+    <div class="k">Ball speed</div>
+    <div class="mph" id="mph">—<span>MPH</span></div>
+    <div class="k" id="units" style="margin-top:8px"></div>
+    <div class="grid">
+      <div class="tile"><div class="k">Launch angle</div><div class="v" id="ang">—</div></div>
+      <div class="tile"><div class="k">Ball size</div><div class="v" id="bpx">—</div></div>
+      <div class="tile"><div class="k">Window</div><div class="v" id="win">—</div></div>
+    </div>
+    <p class="log" id="detail"></p>
+  </div>
+
+  <div class="card">
+    <label>Put this on your homepage</label>
+    <p class="sub" style="margin:0">
+      Host this single file (<code>index.html</code>) on GitHub Pages, Netlify, or any folder on your site.
+      Link it as <code>yoursite.com/kicklab</code>. People upload on their phone. No server, no Claude, no 30 fps transcode from a chat app.
+    </p>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const vid = $("vid"), cv = $("cv"), ctx = cv.getContext("2d", {willReadFrequently:true});
+
+$("file").onchange = e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  $("meta").textContent = f.name + " · " + (f.size/1e6).toFixed(1) + " MB";
+  vid.src = URL.createObjectURL(f);
+};
+
+function isLime(r,g,b){
+  return g > 140 && g > r + 18 && g > b + 25 && r > 50 && b < 160;
+}
+
+function findBall(img, last){
+  const w = img.width, h = img.height, data = img.data;
+  let sx=0, sy=0, n=0, minx=w, maxx=0, miny=h, maxy=0;
+  const x0 = last ? Math.max(0, last.x-90) : 0;
+  const x1 = last ? Math.min(w, last.x+90) : w;
+  const y0 = last ? Math.max(0, last.y-90) : Math.floor(h*0.25);
+  const y1 = last ? Math.min(h, last.y+90) : h;
+  for (let y=y0; y<y1; y+=2){
+    for (let x=x0; x<x1; x+=2){
+      const i = (y*w + x)*4;
+      if (isLime(data[i], data[i+1], data[i+2])){
+        sx += x; sy += y; n++;
+        if (x<minx) minx=x; if (x>maxx) maxx=x;
+        if (y<miny) miny=y; if (y>maxy) maxy=y;
+      }
+    }
+  }
+  if (n < 8) return null;
+  const x = sx/n, y = sy/n;
+  const d = Math.max(maxx-minx, maxy-miny);
+  if (d < 4 || d > 120) return null;
+  return {x,y,d,n};
+}
+
+async function grab(t){
+  return new Promise(res => {
+    const on = () => {
+      vid.removeEventListener("seeked", on);
+      const scale = 960 / vid.videoWidth;
+      cv.width = 960;
+      cv.height = Math.round(vid.videoHeight * scale);
+      ctx.drawImage(vid, 0, 0, cv.width, cv.height);
+      res(ctx.getImageData(0,0,cv.width,cv.height));
+    };
+    vid.addEventListener("seeked", on);
+    vid.currentTime = Math.min(t, Math.max(0, vid.duration - 0.001));
+  });
+}
+
+$("go").onclick = async () => {
+  if (!vid.src){ $("warn").innerHTML = '<div class="warn">Pick a video first.</div>'; return; }
+  $("go").disabled = true;
+  $("warn").innerHTML = "";
+  $("out").style.display = "none";
+  await new Promise(r => {
+    if (vid.readyState >= 1) r();
+    else vid.onloadedmetadata = r;
+  });
+
+  const dur = vid.duration || 0;
+  const vw = vid.videoWidth, vh = vid.videoHeight;
+  $("meta").textContent = vw + "×" + vh + " · " + dur.toFixed(2) + "s";
+  if (vw < 1280){
+    $("warn").innerHTML = '<div class="warn">This file looks small. Use original 4K 120 from Files, not a Messages compress.</div>';
+  }
+
+  const step = dur > 3 ? 0.033 : 0.02;
+  const times = [];
+  for (let t=0; t<Math.min(dur, 8); t += step) times.push(+t.toFixed(3));
+
+  $("meta").textContent += " · scanning " + times.length + " frames";
+  const track = [];
+  let last = null;
+  for (const t of times){
+    const img = await grab(t);
+    const hit = findBall(img, last);
+    if (hit){
+      last = hit;
+      track.push({t, ...hit});
+      ctx.beginPath();
+      ctx.strokeStyle = "#c8ff3d";
+      ctx.lineWidth = 2;
+      ctx.arc(hit.x, hit.y, Math.max(6, hit.d/2), 0, Math.PI*2);
+      ctx.stroke();
+    }
+  }
+
+  if (track.length < 4){
+    $("warn").innerHTML = '<div class="warn">Could not lock the lime ball. Film side-on, ball fully in frame, daylight.</div>';
+    $("go").disabled = false;
+    return;
+  }
+
+  // impact = first sustained rightward move
+  let i0 = 0;
+  for (let i=2; i<track.length-3; i++){
+    if (track[i].x - track[i-2].x > 8 && track[i+2].x - track[i].x > 12){
+      i0 = i; break;
+    }
+  }
+  const tContact = track[i0].t;
+  const win = track.filter(p => p.t >= tContact && p.t <= tContact + 0.14);
+  if (win.length < 3){
+    $("warn").innerHTML = '<div class="warn">Locked the ball but not enough frames after contact. Need a longer clip or higher fps.</div>';
+    $("go").disabled = false;
+    return;
+  }
+  const a = win[0], b = win[win.length-1];
+  const dt = b.t - a.t;
+  const distPx = Math.hypot(b.x-a.x, b.y-a.y);
+  const diamPx = win.map(p => p.d).sort((x,y)=>x-y)[Math.floor(win.length/2)];
+  const meters = +$("ball").value;
+  const mpp = meters / diamPx;
+  // canvas is 960 wide; positions already in canvas pixels. Ball diameter also in canvas px. Consistent.
+  const speed = (distPx * mpp) / dt; // m/s
+  const mph = speed * 2.236936;
+  const ang = Math.atan2(a.y-b.y, Math.abs(b.x-a.x)) * 180/Math.PI;
+
+  $("out").style.display = "block";
+  $("mph").innerHTML = mph.toFixed(0) + "<span>MPH</span>";
+  $("units").textContent = (speed*3.6).toFixed(0) + " KM/H · " + speed.toFixed(1) + " M/S";
+  $("ang").textContent = ang.toFixed(1) + "°";
+  $("bpx").textContent = diamPx.toFixed(0) + " px";
+  $("win").textContent = dt.toFixed(2) + "s";
+  $("detail").textContent =
+    "Contact ~ " + tContact.toFixed(3) + "s · " + win.length + " frames · " +
+    (distPx/diamPx).toFixed(1) + " ball-widths · scale " + (mpp*1000).toFixed(2) + " mm/px.\n" +
+    "Browser read of this file. For a lab number, send the original 4K 120 .MOV in chat.";
+  $("go").disabled = false;
+};
+</script>
+</body>
+</html>
