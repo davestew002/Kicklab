@@ -54,7 +54,7 @@
 const vid=$("vid"), cv=$("cv"), ctx=cv.getContext("2d",{willReadFrequently:true});
 function $(id){return document.getElementById(id)}
 const PINK="#ff2ec8";
-const state={live:false,locked:false,cx:0.72,cy:0.62,r:0.08,gx:0.22,drag:null,lastMph:null,track:[],ready:false,prevData:null};
+const state={live:false,locked:false,cx:0.74,cy:0.68,r:0.055,gx:0.22,drag:null,lastMph:null,track:[],ready:false,prevData:null,lock:null};
 function resize(){cv.width=innerWidth*devicePixelRatio;cv.height=innerHeight*devicePixelRatio}
 addEventListener("resize",resize); resize();
 function prompt(t){$("prompt").textContent=t}
@@ -84,39 +84,39 @@ cv.addEventListener("pointermove",ev=>{
 });
 addEventListener("pointerup",()=>state.drag=null);
 
-function blobIn(img, cx,cy, rad, prev){
+function isBallPix(r,g,b){
+  const bright=r>145&&g>140&&b>110;
+  const lime=g>125&&g>=r-8&&g>b+12&&r>60;
+  return bright||lime;
+}
+function blobIn(img, cx,cy, rad){
   const w=img.width,h=img.height,data=img.data;
-  const x0=Math.max(0,(cx-rad)*w|0), x1=Math.min(w,(cx+rad)*w|0);
-  const y0=Math.max(0,(cy-rad)*h|0), y1=Math.min(h,(cy+rad)*h|0);
+  const x0=Math.max(2,(cx-rad)*w|0), x1=Math.min(w-2,(cx+rad)*w|0);
+  const y0=Math.max(2,(cy-rad)*h|0), y1=Math.min(h-2,(cy+rad)*h|0);
   let sx=0,sy=0,n=0,minx=w,maxx=0,miny=h,maxy=0;
-  for(let y=y0;y<y1;y+=2){
-    for(let x=x0;x<x1;x+=2){
+  for(let y=y0;y<y1;y+=1){
+    for(let x=x0;x<x1;x+=1){
       const nx=x/w, ny=y/h;
       if(Math.hypot(nx-cx,ny-cy)>rad) continue;
       const i=(y*w+x)*4;
-      let on=false;
-      if(prev){
-        const d=Math.abs(data[i]-prev[i])+Math.abs(data[i+1]-prev[i+1])+Math.abs(data[i+2]-prev[i+2]);
-        on=d>70;
-      } else {
-        const r=data[i],g=data[i+1],b=data[i+2];
-        const mx=Math.max(r,g,b), mn=Math.min(r,g,b);
-        on=(mx-mn)>28 || mx>170 || mx<70;
-      }
-      if(on){ sx+=x;sy+=y;n++; if(x<minx)minx=x;if(x>maxx)maxx=x;if(y<miny)miny=y;if(y>maxy)maxy=y; }
+      if(!isBallPix(data[i],data[i+1],data[i+2])) continue;
+      sx+=x;sy+=y;n++;
+      if(x<minx)minx=x;if(x>maxx)maxx=x;if(y<miny)miny=y;if(y>maxy)maxy=y;
     }
   }
-  if(n<14) return null;
-  const d=Math.max(maxx-minx,maxy-miny);
-  if(d<6||d>rad*w*2.2) return null;
+  if(n<10) return null;
+  const dw=maxx-minx, dh=maxy-miny, d=Math.max(dw,dh);
+  const minD=Math.max(6, state.r*w*0.18);
+  const maxD=state.r*w*0.85;
+  if(d<minD||d>maxD) return null;
+  if(dw>0 && dh>0 && (dw/dh>2.2||dh/dw>2.2)) return null;
   return {x:sx/n/w,y:sy/n/h,d:d/w};
 }
 function findBall(img){
-  if(state.ready && state.track.length){
-    const last=state.track[state.track.length-1];
-    return blobIn(img, last.x, last.y, 0.14, state.prevData);
+  if(state.lock && state.track.length){
+    return blobIn(img, state.lock.x, state.lock.y, Math.max(0.08,state.r*1.6));
   }
-  return blobIn(img, state.cx, state.cy, state.r*1.15, state.prevData);
+  return blobIn(img, state.cx, state.cy, state.r*1.05);
 }
 function inRing(p){return Math.hypot(p.x-state.cx,p.y-state.cy)<state.r*1.2}
 
@@ -133,9 +133,10 @@ function draw(hit){
   ctx.lineWidth=5*devicePixelRatio;
   ctx.beginPath(); ctx.moveTo(state.gx*w,0); ctx.lineTo(state.gx*w,h); ctx.stroke();
   ctx.fillText("GATE", state.gx*w+8, 28*devicePixelRatio);
-  if(hit){
-    ctx.beginPath(); ctx.strokeStyle=state.ready?"#7dff6a":"#fff";
-    ctx.arc(hit.x*w,hit.y*h,Math.max(8,hit.d*w/2),0,Math.PI*2); ctx.stroke();
+  const L=state.lock||hit;
+  if(L){
+    ctx.beginPath(); ctx.strokeStyle="#7dff6a"; ctx.lineWidth=4*devicePixelRatio;
+    ctx.arc(L.x*w,L.y*h,Math.max(10, (L.d||state.r*0.35)*w*0.55),0,Math.PI*2); ctx.stroke();
   }
 }
 
@@ -160,7 +161,7 @@ function speedFromTrack(){
   const distN=Math.hypot(dx, dy*(innerHeight/innerWidth));
   const feet=distN/Math.max(state.r,0.02);
   const mph=(feet/dt)*0.681818;
-  if(mph>=8&&mph<=80){ flash(mph); prompt(mph.toFixed(0)+" MPH · put the ball back in the ring"); state.track=[]; state.ready=false; }
+  if(mph>=8&&mph<=80){ flash(mph); prompt(mph.toFixed(0)+" MPH · put the ball back in the ring"); state.track=[]; state.ready=false; state.lock=null; }
 }
 
 function loop(){
@@ -176,13 +177,18 @@ function loop(){
     const t=performance.now()/1000;
     if(state.locked){
       if(hit && inRing(hit)){
+        if(!state.lock) state.lock=hit;
+        else {
+          state.lock={x:state.lock.x*0.65+hit.x*0.35, y:state.lock.y*0.65+hit.y*0.35, d:hit.d};
+        }
         state.ready=true; state.track=[];
-        prompt("READY TO KICK");
+        prompt("READY TO KICK — ball locked");
       } else if(state.ready && hit && !inRing(hit)){
+        state.lock={x:hit.x,y:hit.y,d:hit.d};
         state.track.push({t,x:hit.x,y:hit.y});
         prompt("TRACKING");
         if(state.track.length>=3) speedFromTrack();
-        if(state.track.length && t-state.track[0].t>0.25){ state.track=[]; state.ready=false; prompt("Put the ball in the ring"); }
+        if(state.track.length && t-state.track[0].t>0.25){ state.track=[]; state.ready=false; state.lock=null; prompt("Put the ball in the ring"); }
       } else if(!hit){
         if(!state.ready) prompt("Looking for the ball in the ring…");
       }
@@ -198,7 +204,7 @@ $("lock").onclick=()=>{
   else {state.locked=true;prompt("Place the ball in the ring")}
 };
 $("unlock").onclick=()=>{
-  state.locked=false; state.ready=false; state.track=[];
+  state.locked=false; state.ready=false; state.track=[]; state.lock=null;
   prompt("RECALIBRATE — drag ring and gate, then LOCK");
 };
 </script>
