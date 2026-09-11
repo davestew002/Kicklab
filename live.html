@@ -60,32 +60,28 @@ const $ = id => document.getElementById(id);
 const vid = $("vid");
 const cv = $("cv");
 const ctx = cv.getContext("2d", { willReadFrequently: true });
+const analyze = document.createElement("canvas");
+const actx = analyze.getContext("2d", { willReadFrequently: true });
 
-const BALL_FT = 0.673;          // size 4 diameter in feet
-const RING_R  = 0.042;          // ring radius as fraction of frame width
-const PINK    = "#ff2ec8";
+const BALL_FT = 0.673;
+const RING_R = 0.042;
+const PINK = "#ff2ec8";
 
 const S = {
   live: false,
-  phase: "off",                 // off | seek | mark | fly | done
+  phase: "off",
   cx: 0.74, cy: 0.68, r: RING_R,
   gx: 0.22,
   drag: false,
   quietUntil: 0,
   lastY: 0,
   still: 0,
-  mark: null,                   // {x,y,d,t} ball at rest
-  ball: null,                   // last seen {x,y,d}
-  path: [],                     // flight samples {t,x,y}
+  mark: null,
+  ball: null,
   lastMph: null,
   flyStart: 0,
-  vx: 0,
-  vy: 0,
-  miss: 0
+  fillLock: 0
 };
-
-const analyze = document.createElement("canvas");
-const actx = analyze.getContext("2d", { willReadFrequently: true });
 
 function resize(){
   cv.width  = innerWidth  * devicePixelRatio;
@@ -101,25 +97,20 @@ function resetSeek(){
   S.still = 0;
   S.mark = null;
   S.ball = null;
-  S.path = [];
-  S.flyStart = 0;
+  S.fillLock = 0;
   $("lock").className = "ghost";
 }
 
-function drawCover(c, video, W, H, mirror){
+function drawCover(c, video, W, H){
   const vw = video.videoWidth, vh = video.videoHeight;
   if (!vw) return;
   const scale = Math.max(W / vw, H / vh);
   const dw = vw * scale, dh = vh * scale;
   const ox = (W - dw) / 2, oy = (H - dh) / 2;
   c.save();
-  if (mirror){
-    c.translate(W, 0);
-    c.scale(-1, 1);
-    c.drawImage(video, W - ox - dw, oy, dw, dh);
-  } else {
-    c.drawImage(video, ox, oy, dw, dh);
-  }
+  c.translate(W, 0);
+  c.scale(-1, 1);
+  c.drawImage(video, W - ox - dw, oy, dw, dh);
   c.restore();
 }
 
@@ -149,10 +140,8 @@ function onDown(ev){
   if (!nearRing(p)) return;
   S.drag = true;
   S.lastY = p.y;
+  resetSeek();
   S.phase = "seek";
-  S.still = 0;
-  S.mark = null;
-  S.path = [];
 }
 function onMove(ev){
   if (!S.drag) return;
@@ -165,7 +154,6 @@ function onUp(){
   if (!S.drag) return;
   S.drag = false;
   S.quietUntil = performance.now() + 700;
-  S.phase = "seek";
   say("Ring set — ball in the ring, hold still");
 }
 document.addEventListener("pointerdown", onDown, { passive: false });
@@ -176,79 +164,75 @@ document.addEventListener("touchmove", onMove, { passive: false });
 document.addEventListener("touchend", onUp);
 
 function isBallPix(r, g, b){
-  const grass = g > r + 12 && g > b + 8 && g > 50 && g < 210;
-  if (grass) return false;
+  if (g > r + 14 && g > b + 10 && g > 55) return false;
   const lum = (r + g + b) / 3;
-  if (lum > 145) return true;
-  if (r > 135 && r > g + 22 && r > b + 12) return true;
-  if (lum < 75 && Math.abs(r - g) < 28 && Math.abs(g - b) < 28) return true;
-  return lum > 95;
+  if (lum > 150) return true;
+  if (r > 140 && r > g + 20) return true;
+  return lum > 110;
 }
 
-function blobIn(img, cx, cy, rad){
+function ringFill(img){
   const w = img.width, h = img.height, data = img.data;
-  const x0 = Math.max(1, (cx - rad) * w | 0);
-  const x1 = Math.min(w - 1, (cx + rad) * w | 0);
-  const y0 = Math.max(1, (cy - rad) * h | 0);
-  const y1 = Math.min(h - 1, (cy + rad) * h | 0);
-  let sx = 0, sy = 0, n = 0, minx = w, maxx = 0, miny = h, maxy = 0;
+  const rad = S.r * w;
+  const cx = S.cx * w, cy = S.cy * h;
+  const x0 = Math.max(1, (S.cx - S.r) * w | 0);
+  const x1 = Math.min(w - 1, (S.cx + S.r) * w | 0);
+  const y0 = Math.max(1, (S.cy - S.r * 1.4) * h | 0);
+  const y1 = Math.min(h - 1, (S.cy + S.r * 1.4) * h | 0);
+  let n = 0, sx = 0, sy = 0, minx = w, maxx = 0, miny = h, maxy = 0;
   for (let y = y0; y < y1; y++){
     for (let x = x0; x < x1; x++){
-      if (Math.hypot(x - cx * w, y - cy * h) > rad * w) continue;
+      if (Math.hypot(x - cx, y - cy) > rad) continue;
       const i = (y * w + x) * 4;
       if (!isBallPix(data[i], data[i + 1], data[i + 2])) continue;
-      sx += x; sy += y; n++;
+      n++; sx += x; sy += y;
       if (x < minx) minx = x; if (x > maxx) maxx = x;
       if (y < miny) miny = y; if (y > maxy) maxy = y;
     }
   }
-  if (n < 18) return null;
-  const d = Math.max(4, Math.max(maxx - minx, maxy - miny)) / w;
-  if (d < 0.012 || d > 0.12) return null;
-  return { x: sx / n / w, y: sy / n / h, d };
+  if (n < 20) return { n: 0 };
+  return {
+    n,
+    x: sx / n / w,
+    y: sy / n / h,
+    d: Math.max(maxx - minx, maxy - miny) / w
+  };
 }
 
-function inRing(p){
-  return Math.hypot(p.x - S.cx, p.y - S.cy) < S.r * 1.25;
-}
-
-function scanLane(img, x0, x1, y){
-  const dir = x1 < x0 ? -1 : 1;
+function findLeft(img){
+  const w = img.width, h = img.height, data = img.data;
+  const step = 6;
   let best = null, bestN = 0;
-  for (let x = x0; dir < 0 ? x >= x1 : x <= x1; x += 0.05 * dir){
-    const hit = blobIn(img, x, y, 0.11);
-    if (!hit) continue;
-    if (hit.x * dir < x0 * dir - 0.01) continue;
-    const n = 1 / (Math.abs(hit.y - y) + 0.02);
-    if (n > bestN){ best = hit; bestN = n; }
+  const y0 = Math.max(1, (0.22 * h) | 0);
+  const y1 = Math.min(h - 1, (0.90 * h) | 0);
+  const x1 = Math.max(2, ((S.cx - 0.06) * w) | 0);
+  for (let y = y0; y < y1; y += step){
+    for (let x = 4; x < x1; x += step){
+      const i = (y * w + x) * 4;
+      if (!isBallPix(data[i], data[i + 1], data[i + 2])) continue;
+      let n = 0, sx = 0, sy = 0, minx = w, maxx = 0, miny = h, maxy = 0;
+      const xA = Math.max(1, x - 18), xB = Math.min(w - 1, x + 18);
+      const yA = Math.max(1, y - 18), yB = Math.min(h - 1, y + 18);
+      for (let yy = yA; yy < yB; yy++){
+        for (let xx = xA; xx < xB; xx++){
+          const j = (yy * w + xx) * 4;
+          if (!isBallPix(data[j], data[j + 1], data[j + 2])) continue;
+          n++; sx += xx; sy += yy;
+          if (xx < minx) minx = xx; if (xx > maxx) maxx = xx;
+          if (yy < miny) miny = yy; if (yy > maxy) maxy = yy;
+        }
+      }
+      if (n < 30) continue;
+      const dw = (maxx - minx) / w, dh = (maxy - miny) / h;
+      const d = Math.max(dw, dh);
+      if (d < 0.016 || d > 0.10) continue;
+      if (n > bestN){
+        bestN = n;
+        best = { x: sx / n / w, y: sy / n / h, d };
+      }
+    }
   }
   return best;
-}
-
-function findBall(img){
-  if (S.phase === "fly"){
-    const ox = S.ball ? S.ball.x : S.cx;
-    const oy = S.ball ? S.ball.y : S.cy;
-    const px = Math.max(0.05, Math.min(0.95, ox + (S.vx || -0.08)));
-    const py = Math.max(0.25, Math.min(0.92, oy + (S.vy || 0.02)));
-    let hit = blobIn(img, px, py, 0.13);
-    if (hit) return hit;
-    hit = blobIn(img, ox - 0.08, oy + 0.04, 0.13);
-    if (hit) return hit;
-    hit = scanLane(img, ox, S.gx - 0.02, oy + 0.04);
-    if (hit) return hit;
-    hit = scanLane(img, ox, S.gx - 0.02, S.cy + 0.06);
-    if (hit) return hit;
-    hit = blobIn(img, S.gx + 0.06, S.cy + 0.05, 0.14);
-    if (hit) return hit;
-    return null;
-  }
-  return blobIn(img, S.cx, S.cy, S.r * 1.35);
-}
-
-function feetPerNorm(){
-  const d = (S.mark && S.mark.d) || (S.ball && S.ball.d) || (S.r * 1.1);
-  return BALL_FT / Math.max(d, 0.014);
 }
 
 function publish(mph){
@@ -259,54 +243,24 @@ function publish(mph){
   else if (mph > S.lastMph + 1){ el.textContent = "↑"; el.className = "arrow up"; }
   else if (mph < S.lastMph - 1){ el.textContent = "↓"; el.className = "arrow down"; }
   else { el.textContent = "→"; el.className = "arrow same"; }
-  $("meta").textContent = "Peak frames · size 4 ball is the ruler";
+  $("meta").textContent = "Mark to first airborne · size 4 ruler";
   S.lastMph = mph;
   say(mph + " MPH · put the ball back in the ring");
   S.phase = "done";
-  S.path = [];
 }
 
-function speedFromPath(){
-  const tr = S.path;
-  if (tr.length < 2) return false;
-  const toward = S.gx - S.cx;
+function scoreHit(hit, t){
+  if (!S.mark || !hit) return false;
+  const dt = t - S.mark.t;
+  if (dt < 0.05 || dt > 0.60) return false;
+  if (hit.x > S.mark.x - 0.05) return false;
   const aspect = innerHeight / innerWidth;
-  const fpp = feetPerNorm();
-  let best = 0;
-  for (let i = 0; i < tr.length - 1; i++){
-    const a = tr[i], b = tr[i + 1];
-    const dt = b.t - a.t;
-    if (dt < 0.018 || dt > 0.12) continue;
-    const dx = b.x - a.x, dy = b.y - a.y;
-    if (toward !== 0 && dx * toward <= 0) continue;
-    const mph = (Math.hypot(dx, dy * aspect) * fpp / dt) * 0.681818;
-    if (mph > best) best = mph;
-  }
-  if (tr.length >= 3){
-    const a = tr[0], b = tr[Math.min(tr.length - 1, 4)];
-    const dt = b.t - a.t;
-    if (dt >= 0.04 && dt <= 0.22){
-      const dx = b.x - a.x, dy = b.y - a.y;
-      if (!(toward !== 0 && dx * toward <= 0)){
-        const mph = (Math.hypot(dx, dy * aspect) * fpp / dt) * 0.681818;
-        if (mph > best) best = mph;
-      }
-    }
-  }
-  if (best >= 10 && best <= 80){
-    publish(best);
-    return true;
-  }
-  return false;
-}
-
-function beginFly(t, x, y){
-  S.phase = "fly";
-  S.flyStart = t;
-  S.path = [];
-  if (S.mark) S.path.push({ t: S.mark.t || t, x: S.mark.x, y: S.mark.y });
-  S.path.push({ t, x, y });
-  say("KICK — left the mark");
+  const fpp = BALL_FT / Math.max(S.mark.d || hit.d || 0.04, 0.016);
+  const dist = Math.hypot(hit.x - S.mark.x, (hit.y - S.mark.y) * aspect) * fpp;
+  const mph = (dist / dt) * 0.681818;
+  if (mph < 12 || mph > 85) return false;
+  publish(mph);
+  return true;
 }
 
 function draw(hit){
@@ -330,10 +284,10 @@ function draw(hit){
   ctx.stroke();
   ctx.fillText("GATE", S.gx * w + 8, 28 * devicePixelRatio);
   const L = hit || S.ball;
-  if (L){
+  if (L && L.x != null){
     ctx.strokeStyle = armed ? "#ff2a2a" : "#7dff6a";
     ctx.lineWidth = 4 * devicePixelRatio;
-    const rr = Math.min(S.r * w * 0.8, Math.max(8 * devicePixelRatio, (L.d || 0.03) * w * 0.5));
+    const rr = Math.min(S.r * w * 0.85, Math.max(8 * devicePixelRatio, (L.d || 0.03) * w * 0.5));
     ctx.beginPath();
     ctx.arc(L.x * w, L.y * h, rr, 0, Math.PI * 2);
     ctx.stroke();
@@ -343,74 +297,72 @@ function draw(hit){
 function loop(){
   if (!S.live) return;
   if (vid.videoWidth){
-    const tw = 640, th = Math.round(640 * cv.height / cv.width);
+    const tw = 480, th = Math.round(480 * cv.height / cv.width);
     if (analyze.width !== tw || analyze.height !== th){
       analyze.width = tw; analyze.height = th;
     }
-    drawCover(actx, vid, tw, th, true);
+    drawCover(actx, vid, tw, th);
     const frame = actx.getImageData(0, 0, tw, th);
-    const hit = findBall(frame);
     const t = performance.now() / 1000;
     const quiet = S.drag || performance.now() < S.quietUntil;
+    const fill = ringFill(frame);
 
     if (quiet){
-      draw(hit);
+      draw(fill.n ? fill : null);
       requestAnimationFrame(loop);
       return;
     }
 
     if (S.phase === "done"){
-      if (hit && inRing(hit)){
+      if (fill.n > 40 && fill.n > S.fillLock * 0.5){
         S.phase = "seek";
         S.still = 0;
-        S.ball = hit;
         say("Ball in ring — hold still");
       }
-      draw(hit);
+      draw(fill.n ? fill : null);
       requestAnimationFrame(loop);
       return;
     }
 
     if (S.phase === "fly"){
-      if (hit){
-        if (S.ball){
-          S.vx = hit.x - S.ball.x;
-          S.vy = hit.y - S.ball.y;
-        }
-        S.ball = hit;
-        S.path.push({ t, x: hit.x, y: hit.y });
-        if (speedFromPath()) { draw(hit); requestAnimationFrame(loop); return; }
-      }
-      if (t - S.flyStart > 0.80){
-        if (!speedFromPath()){
-          say("Missed the flight — ball back in the ring");
-          S.phase = "done";
+      const air = findLeft(frame);
+      if (air){
+        S.ball = air;
+        if (scoreHit(air, t)){
+          draw(air);
+          requestAnimationFrame(loop);
+          return;
         }
       }
-      draw(hit || S.ball);
+      if (t - S.flyStart > 0.70){
+        say("Missed the flight — ball back in the ring");
+        S.phase = "done";
+      }
+      draw(air);
       requestAnimationFrame(loop);
       return;
     }
 
-    // seek or mark — once armed, stay armed until the ball leaves the ring
     if (S.phase === "mark"){
-      if (hit && inRing(hit)){
-        S.ball = hit;
-        S.miss = 0;
+      if (fill.n > S.fillLock * 0.45 && fill.n > 25){
+        S.ball = fill;
         say("ON THE MARK — kick when ready");
       } else {
-        S.miss++;
-        if (S.miss >= 2){
-          const x = hit ? hit.x : (S.mark ? S.mark.x : S.cx);
-          const y = hit ? hit.y : (S.mark ? S.mark.y : S.cy);
-          beginFly(t, x, y);
+        S.phase = "fly";
+        S.flyStart = t;
+        say("KICK — left the mark");
+        const air = findLeft(frame);
+        if (air){
+          S.ball = air;
+          scoreHit(air, t);
         }
       }
-    } else if (hit && inRing(hit)){
-      S.ball = hit;
+    } else if (fill.n > 35 && fill.d > 0.018 && fill.d < 0.11){
+      S.ball = fill;
       S.still++;
-      if (S.still >= 6){
-        S.mark = { x: hit.x, y: hit.y, d: hit.d, t };
+      if (S.still >= 5){
+        S.mark = { x: fill.x, y: fill.y, d: fill.d, t };
+        S.fillLock = fill.n;
         S.phase = "mark";
         $("lock").className = "go";
         say("ON THE MARK — kick when ready");
@@ -422,7 +374,7 @@ function loop(){
       S.ball = null;
       say("Looking for the ball in the ring…");
     }
-    draw(hit || S.ball);
+    draw(fill.n ? fill : S.ball);
   } else {
     draw(null);
   }
@@ -434,6 +386,7 @@ $("lock").onclick = () => {
   const arm = () => {
     if (S.ball) S.mark = { x: S.ball.x, y: S.ball.y, d: S.ball.d, t: performance.now() / 1000 };
     else S.mark = { x: S.cx, y: S.cy, d: S.r * 1.1, t: performance.now() / 1000 };
+    S.fillLock = 80;
     S.phase = "mark";
     S.still = 99;
     $("lock").className = "go";
