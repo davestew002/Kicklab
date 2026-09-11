@@ -78,7 +78,9 @@ const S = {
   ball: null,                   // last seen {x,y,d}
   path: [],                     // flight samples {t,x,y}
   lastMph: null,
-  flyStart: 0
+  flyStart: 0,
+  vx: 0,
+  vy: 0
 };
 
 const analyze = document.createElement("canvas");
@@ -194,12 +196,10 @@ function blobIn(img, cx, cy, rad){
       if (y < miny) miny = y; if (y > maxy) maxy = y;
     }
   }
-  if (n < 10) return null;
-  return {
-    x: sx / n / w,
-    y: sy / n / h,
-    d: Math.max(4, Math.max(maxx - minx, maxy - miny)) / w
-  };
+  if (n < 18) return null;
+  const d = Math.max(4, Math.max(maxx - minx, maxy - miny)) / w;
+  if (d < 0.012 || d > 0.12) return null;
+  return { x: sx / n / w, y: sy / n / h, d };
 }
 
 function inRing(p){
@@ -207,9 +207,22 @@ function inRing(p){
 }
 
 function findBall(img){
-  if (S.phase === "fly" && S.ball){
-    const hit = blobIn(img, S.ball.x, S.ball.y, 0.16);
-    if (hit && Math.abs(hit.x - S.gx) > 0.04) return hit;
+  if (S.phase === "fly"){
+    const ox = S.ball ? S.ball.x : S.cx;
+    const oy = S.ball ? S.ball.y : S.cy;
+    const px = ox + (S.vx || -0.06);
+    const py = oy + (S.vy || 0);
+    const spots = [
+      [px, py, 0.14],
+      [ox - 0.10, oy, 0.16],
+      [ox - 0.20, oy, 0.16],
+      [(ox + S.gx) / 2, oy - 0.04, 0.18],
+      [S.gx + 0.10, oy, 0.16]
+    ];
+    for (const [x, y, r] of spots){
+      const hit = blobIn(img, x, y, r);
+      if (hit) return hit;
+    }
     return null;
   }
   return blobIn(img, S.cx, S.cy, S.r * 1.25);
@@ -342,11 +355,15 @@ function loop(){
 
     if (S.phase === "fly"){
       if (hit){
+        if (S.ball){
+          S.vx = hit.x - S.ball.x;
+          S.vy = hit.y - S.ball.y;
+        }
         S.ball = hit;
         S.path.push({ t, x: hit.x, y: hit.y });
         if (speedFromPath()) { draw(hit); requestAnimationFrame(loop); return; }
       }
-      if (t - S.flyStart > 0.35){
+      if (t - S.flyStart > 0.50){
         if (!speedFromPath()){
           say("Missed the flight — ball back in the ring");
           S.phase = "done";
@@ -357,38 +374,30 @@ function loop(){
       return;
     }
 
-    // seek or mark
-    if (hit && inRing(hit)){
-      const prev = S.ball;
-      const jump = prev ? Math.hypot(hit.x - prev.x, hit.y - prev.y) : 0;
-      S.ball = hit;
-
-      if (S.phase === "mark" && S.mark && Math.hypot(hit.x - S.mark.x, hit.y - S.mark.y) > S.r * 0.65){
-        beginFly(t, hit.x, hit.y);
-        speedFromPath();
-      } else if (jump < 0.01){
-        S.still++;
-        if (S.still >= 8){
-          S.mark = { x: hit.x, y: hit.y, d: hit.d, t };
-          S.phase = "mark";
-          $("lock").className = "go";
-          say("ON THE MARK — kick when ready");
-        } else {
-          S.phase = "seek";
-          say("Ball in ring — hold still…");
-        }
+    // seek or mark — once armed, stay armed until the ball leaves the ring
+    if (S.phase === "mark"){
+      if (hit && inRing(hit)){
+        S.ball = hit;
+        say("ON THE MARK — kick when ready");
       } else {
-        S.still = Math.max(0, S.still - 2);
-        S.phase = "seek";
+        const x = hit ? hit.x : (S.mark ? S.mark.x : S.cx);
+        const y = hit ? hit.y : (S.mark ? S.mark.y : S.cy);
+        beginFly(t, x, y);
+      }
+    } else if (hit && inRing(hit)){
+      S.ball = hit;
+      S.still++;
+      if (S.still >= 6){
+        S.mark = { x: hit.x, y: hit.y, d: hit.d, t };
+        S.phase = "mark";
+        $("lock").className = "go";
+        say("ON THE MARK — kick when ready");
+      } else {
         say("Ball in ring — hold still…");
       }
-    } else if (S.phase === "mark"){
-      const x = S.ball ? S.ball.x : S.cx;
-      const y = S.ball ? S.ball.y : S.cy;
-      beginFly(t, x, y);
     } else {
       S.still = 0;
-      S.ball = hit;
+      S.ball = null;
       say("Looking for the ball in the ring…");
     }
     draw(hit || S.ball);
