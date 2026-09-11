@@ -136,16 +136,14 @@ function blobIn(img, cx,cy, rad){
   return {x:sx/n/w,y:sy/n/h,d:d/w,n,tot};
 }
 function findBall(img){
-  if(state.lock){
+  const inR=blobIn(img, state.cx, state.cy, state.r*1.2);
+  if(inR) return Object.assign(inR,{inRing:true});
+  if(state.flying && state.lock){
     const px=state.lock.x+(state.vx||0);
     const py=state.lock.y+(state.vy||0);
-    const near=blobIn(img, px, py, 0.16);
-    if(near) return near;
-    const wider=blobIn(img, px, py, 0.30);
-    if(wider) return wider;
+    const near=blobIn(img, px, py, 0.12);
+    if(near && Math.abs(near.x-state.gx)>0.08) return near;
   }
-  const inR=blobIn(img, state.cx, state.cy, state.r*1.15);
-  if(inR) return Object.assign(inR,{inRing:true});
   return null;
 }
 function inRing(p){return Math.hypot(p.x-state.cx,p.y-state.cy)<state.r*1.2}
@@ -168,7 +166,8 @@ function draw(hit){
   const L=state.lock||hit;
   if(L){
     ctx.beginPath(); ctx.strokeStyle=state.ready?"#ff2a2a":"#7dff6a"; ctx.lineWidth=4*devicePixelRatio;
-    ctx.arc(L.x*w,L.y*h,Math.max(10, (L.d||state.r*0.35)*w*0.55),0,Math.PI*2); ctx.stroke();
+    const rr=Math.min(state.r*w*0.85, Math.max(8*devicePixelRatio, (L.d||0.03)*w*0.5));
+    ctx.arc(L.x*w,L.y*h,rr,0,Math.PI*2); ctx.stroke();
   }
 }
 
@@ -193,7 +192,7 @@ function speedFromTrack(){
   const distN=Math.hypot(dx, dy*(innerHeight/innerWidth));
   const feet=distN/Math.max(state.r,0.02);
   const mph=(feet/dt)*0.681818;
-  if(mph>=8&&mph<=80){ flash(mph); prompt(mph.toFixed(0)+" MPH · put the ball back in the ring"); state.track=[]; state.ready=false; state.lock=null; }
+  if(mph>=8&&mph<=80){ flash(mph); prompt(mph.toFixed(0)+" MPH · put the ball back in the ring"); state.track=[]; state.ready=false; state.lock=null; state.flying=false; state.vx=0; state.vy=0; }
 }
 
 function loop(){
