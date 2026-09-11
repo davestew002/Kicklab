@@ -99,6 +99,7 @@ function resetSeek(){
   S.ball = null;
   S.fillLock = 0;
   $("lock").className = "ghost";
+  clearMph();
 }
 
 function drawCover(c, video, W, H){
@@ -203,11 +204,11 @@ function findLeft(img){
   const w = img.width, h = img.height, data = img.data;
   const step = 6;
   let best = null, bestN = 0;
-  const y0 = Math.max(1, (0.22 * h) | 0);
-  const y1 = Math.min(h - 1, (0.90 * h) | 0);
-  const x1 = Math.max(2, ((S.cx - 0.06) * w) | 0);
+  const y0 = Math.max(1, (0.28 * h) | 0);
+  const y1 = Math.min(h - 1, (0.92 * h) | 0);
+  const x1 = Math.max(8, ((S.cx - 0.08) * w) | 0);
   for (let y = y0; y < y1; y += step){
-    for (let x = 4; x < x1; x += step){
+    for (let x = 2; x < x1; x += step){
       const i = (y * w + x) * 4;
       if (!isBallPix(data[i], data[i + 1], data[i + 2])) continue;
       let n = 0, sx = 0, sy = 0, minx = w, maxx = 0, miny = h, maxy = 0;
@@ -235,6 +236,13 @@ function findLeft(img){
   return best;
 }
 
+function clearMph(){
+  $("mph").innerHTML = "—<span>MPH</span>";
+  $("arrow").textContent = "→";
+  $("arrow").className = "arrow same";
+  $("meta").textContent = "Size 4 ball is the ruler";
+}
+
 function publish(mph){
   mph = Math.round(mph);
   $("mph").innerHTML = mph + "<span>MPH</span>";
@@ -243,7 +251,7 @@ function publish(mph){
   else if (mph > S.lastMph + 1){ el.textContent = "↑"; el.className = "arrow up"; }
   else if (mph < S.lastMph - 1){ el.textContent = "↓"; el.className = "arrow down"; }
   else { el.textContent = "→"; el.className = "arrow same"; }
-  $("meta").textContent = "Mark to first airborne · size 4 ruler";
+  $("meta").textContent = "Leave-to-airborne · size 4 ruler";
   S.lastMph = mph;
   say(mph + " MPH · put the ball back in the ring");
   S.phase = "done";
@@ -251,14 +259,16 @@ function publish(mph){
 
 function scoreHit(hit, t){
   if (!S.mark || !hit) return false;
-  const dt = t - S.mark.t;
-  if (dt < 0.05 || dt > 0.60) return false;
-  if (hit.x > S.mark.x - 0.05) return false;
+  const t0 = S.flyStart || S.mark.t;
+  const dt = t - t0;
+  if (dt < 0.12 || dt > 0.80) return false;
+  if (hit.x > S.mark.x - 0.12) return false;
   const aspect = innerHeight / innerWidth;
-  const fpp = BALL_FT / Math.max(S.mark.d || hit.d || 0.04, 0.016);
+  const fpp = BALL_FT / Math.max(S.mark.d || hit.d || 0.04, 0.018);
   const dist = Math.hypot(hit.x - S.mark.x, (hit.y - S.mark.y) * aspect) * fpp;
+  if (dist < 2.0) return false;
   const mph = (dist / dt) * 0.681818;
-  if (mph < 12 || mph > 85) return false;
+  if (mph < 10 || mph > 70) return false;
   publish(mph);
   return true;
 }
@@ -326,19 +336,19 @@ function loop(){
 
     if (S.phase === "fly"){
       const air = findLeft(frame);
-      if (air){
-        S.ball = air;
-        if (scoreHit(air, t)){
-          draw(air);
+      if (air && (!S.ball || air.x < S.ball.x)) S.ball = air;
+      if (S.ball && (t - S.flyStart) >= 0.12){
+        if (scoreHit(S.ball, t)){
+          draw(S.ball);
           requestAnimationFrame(loop);
           return;
         }
       }
-      if (t - S.flyStart > 0.70){
+      if (t - S.flyStart > 0.90){
         say("Missed the flight — ball back in the ring");
         S.phase = "done";
       }
-      draw(air);
+      draw(air || S.ball);
       requestAnimationFrame(loop);
       return;
     }
@@ -350,12 +360,8 @@ function loop(){
       } else {
         S.phase = "fly";
         S.flyStart = t;
+        S.ball = null;
         say("KICK — left the mark");
-        const air = findLeft(frame);
-        if (air){
-          S.ball = air;
-          scoreHit(air, t);
-        }
       }
     } else if (fill.n > 35 && fill.d > 0.018 && fill.d < 0.11){
       S.ball = fill;
@@ -365,6 +371,7 @@ function loop(){
         S.fillLock = fill.n;
         S.phase = "mark";
         $("lock").className = "go";
+        clearMph();
         say("ON THE MARK — kick when ready");
       } else {
         say("Ball in ring — hold still…");
