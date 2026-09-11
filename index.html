@@ -2,42 +2,42 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>KICKLAB</title>
 <style>
-  :root{--bg:#05060a;--card:#0e121b;--line:#222a3b;--lime:#c8ff3d;--dim:#8b93a7;--txt:#f4f6fb;--warn:#e6c35a}
+  :root{--bg:#07080d;--card:#10131c;--line:#1e2433;--lime:#c8ff3d;--dim:#8b93a7;--txt:#f4f6fb;--warn:#e6c35a}
   *{box-sizing:border-box}
-  body{margin:0;background:radial-gradient(1200px 600px at 20% -10%,#1a2208 0%,#05060a 45%);color:var(--txt);font-family:ui-sans-serif,system-ui,-apple-system,sans-serif}
-  .wrap{max-width:760px;margin:0 auto;padding:22px 16px 80px}
-  h1{letter-spacing:.28em;font-size:12px;color:var(--lime);margin:0}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:ui-sans-serif,system-ui,-apple-system,sans-serif}
+  .wrap{max-width:760px;margin:0 auto;padding:22px 16px 70px}
+  h1{letter-spacing:.22em;font-size:13px;color:var(--lime);margin:0}
   .sub{color:var(--dim);font-size:13px;margin:8px 0 18px;line-height:1.45}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;margin:12px 0}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin:12px 0}
   label{display:block;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin:10px 0 6px}
-  input,select,button{width:100%;border-radius:12px;border:1px solid var(--line);background:#090c13;color:var(--txt);padding:13px;font:inherit}
-  button{background:var(--lime);color:#111;font-weight:800;letter-spacing:.1em;border:0;margin-top:12px}
+  input,select,button{width:100%;border-radius:10px;border:1px solid var(--line);background:#0c0f16;color:var(--txt);padding:12px;font:inherit}
+  button{background:var(--lime);color:#111;font-weight:800;letter-spacing:.08em;border:0;margin-top:12px}
   button:disabled{opacity:.5}
   video,canvas{width:100%;max-height:240px;object-fit:contain;border-radius:12px;background:#000;display:block;margin-top:10px}
-  .mph{font-size:72px;font-weight:800;letter-spacing:-.05em;line-height:.88}
-  .mph span{font-size:16px;color:var(--dim);margin-left:8px}
+  .mph{font-size:64px;font-weight:800;letter-spacing:-.04em;line-height:.9}
+  .mph span{font-size:18px;color:var(--dim);margin-left:8px}
   .grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:12px}
-  .tile{background:#090c13;border:1px solid var(--line);border-radius:12px;padding:10px}
+  .tile{background:#0c0f16;border:1px solid var(--line);border-radius:12px;padding:10px}
   .k{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
   .v{font-size:20px;font-weight:800;margin-top:4px}
   .warn{color:var(--warn);font-size:13px;line-height:1.45;border:1px solid #c9a227;border-radius:10px;padding:10px;margin:10px 0}
   .log{color:var(--dim);font-size:13px;line-height:1.4}
-  .bar{height:12px;background:#090c13;border:1px solid var(--line);border-radius:99px;overflow:hidden;margin:10px 0}
-  .bar>i{display:block;height:100%;width:0;background:linear-gradient(90deg,#7dff6a,#c8ff3d)}
-  .pct{font-size:34px;font-weight:800;color:var(--lime)}
+  .bar{height:12px;background:#0c0f16;border:1px solid var(--line);border-radius:99px;overflow:hidden;margin:10px 0}
+  .bar>i{display:block;height:100%;width:0;background:var(--lime)}
+  .pct{font-size:32px;font-weight:800;color:var(--lime)}
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>KICKLAB</h1>
-  <p class="sub">Any soccer ball. Lime, white, orange, yellow. iPhone now steps frame-by-frame so it cannot fake a finished run off the last picture.</p>
+  <p class="sub">Green ball code, plus white. After every seek the phone plays one blink so the picture is not black.</p>
   <div class="card">
     <label>Video</label>
     <input id="file" type="file" accept="video/*"/>
-    <label>Ball size</label>
+    <label>Ball</label>
     <select id="ball">
       <option value="0.205" selected>Size 4 — 20.5 cm</option>
       <option value="0.191">Size 3 — 19.1 cm</option>
@@ -46,7 +46,7 @@
     <button id="go">READ THE KICK</button>
     <div class="bar"><i id="fill"></i></div>
     <div class="pct" id="pct">0%</div>
-    <div class="log" id="meta">Waiting for a file</div>
+    <div class="log" id="meta">Waiting</div>
     <div id="warn"></div>
     <video id="vid" playsinline webkit-playsinline muted preload="auto" controls></video>
   </div>
@@ -67,8 +67,6 @@
 const $ = id => document.getElementById(id);
 const vid=$("vid"), cv=$("cv"), ctx=cv.getContext("2d",{willReadFrequently:true});
 let running=false;
-const isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform==="MacIntel" && navigator.maxTouchPoints>1);
-
 function setStatus(p,msg){
   $("fill").style.width=Math.max(0,Math.min(100,p))+"%";
   $("pct").textContent=Math.round(Math.max(0,Math.min(100,p)))+"%";
@@ -76,50 +74,33 @@ function setStatus(p,msg){
 }
 function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
-function isBallColor(r,g,b){
-  if(g>128 && g>r+12 && g>b+18 && b<175) return true;          // lime / neon
-  if(r>155 && g>145 && b<130 && Math.abs(r-g)<55) return true;  // yellow
-  if(r>175 && g>165 && b>145 && Math.abs(r-g)<42) return true;  // white
-  if(r>155 && r>g+18 && r>b+12 && g>55 && b<140) return true;   // orange / red panel
-  return false;
+function isTarget(r,g,b){
+  const green = g>130 && g>r+14 && g>b+18 && r>35 && b<170;
+  const white = r>180 && g>170 && b>150 && Math.abs(r-g)<40 && Math.abs(g-b)<45;
+  const yellow = r>150 && g>150 && b<120 && Math.abs(r-g)<50;
+  return green || white || yellow;
 }
 
-function findBall(img, last){
+function findBall(img,last){
   const w=img.width,h=img.height,data=img.data;
-  const x0=last?Math.max(0,Math.floor(last.x-100)):0;
-  const x1=last?Math.min(w,Math.floor(last.x+120)):Math.floor(w*0.92);
-  const y0=last?Math.max(0,Math.floor(last.y-90)):Math.floor(h*0.18);
-  const y1=last?Math.min(h,Math.floor(last.y+90)):Math.floor(h*0.82);
-  const gw=Math.ceil((x1-x0)/8), gh=Math.ceil((y1-y0)/8);
-  const acc=new Int16Array(gw*gh);
+  let sx=0,sy=0,n=0,minx=w,maxx=0,miny=h,maxy=0;
+  const x0=last?Math.max(0,last.x-70):0;
+  const x1=last?Math.min(w,last.x+80):Math.floor(w*0.88);
+  const y0=last?Math.max(0,last.y-70):Math.floor(h*0.22);
+  const y1=last?Math.min(h,last.y+70):Math.floor(h*0.8);
   for(let y=y0;y<y1;y+=2){
     for(let x=x0;x<x1;x+=2){
       const i=(y*w+x)*4;
-      if(isBallColor(data[i],data[i+1],data[i+2])){
-        const bx=Math.floor((x-x0)/8), by=Math.floor((y-y0)/8);
-        acc[by*gw+bx]++;
-      }
-    }
-  }
-  let best=0,bi=-1;
-  for(let i=0;i<acc.length;i++) if(acc[i]>best){best=acc[i];bi=i;}
-  if(best<6) return null;
-  const bx=bi%gw, by=Math.floor(bi/gw);
-  const cx0=x0+bx*8, cy0=y0+by*8;
-  let sx=0,sy=0,n=0,minx=w,maxx=0,miny=h,maxy=0;
-  for(let y=Math.max(y0,cy0-24); y<Math.min(y1,cy0+32); y+=1){
-    for(let x=Math.max(x0,cx0-24); x<Math.min(x1,cx0+32); x+=1){
-      const i=(y*w+x)*4;
-      if(isBallColor(data[i],data[i+1],data[i+2])){
+      if(isTarget(data[i],data[i+1],data[i+2])){
         sx+=x;sy+=y;n++;
         if(x<minx)minx=x; if(x>maxx)maxx=x;
         if(y<miny)miny=y; if(y>maxy)maxy=y;
       }
     }
   }
-  if(n<10) return null;
+  if(n<8) return null;
   const d=Math.max(maxx-minx,maxy-miny);
-  if(d<6||d>90) return null;
+  if(d<5||d>80) return null;
   return {x:sx/n,y:sy/n,d,n};
 }
 
@@ -129,16 +110,25 @@ function snap(){
   cv.width=W;
   cv.height=Math.max(1,Math.round(vid.videoHeight*(W/vid.videoWidth)));
   ctx.drawImage(vid,0,0,cv.width,cv.height);
-  const img=ctx.getImageData(0,0,cv.width,cv.height);
-  let s=0;
-  for(let i=0;i<img.data.length;i+=64) s+=img.data[i];
-  if(s<80) return null;
-  return img;
+  return ctx.getImageData(0,0,cv.width,cv.height);
+}
+
+async function armFrame(t){
+  await new Promise(res=>{
+    let done=false;
+    const fin=()=>{ if(done)return; done=true; vid.removeEventListener("seeked",fin); res(); };
+    vid.addEventListener("seeked",fin);
+    vid.currentTime=Math.min(Math.max(0,t), Math.max(0,(vid.duration||t)-0.01));
+    setTimeout(fin,800);
+  });
+  try{ await vid.play(); }catch(e){}
+  await sleep(60);
+  vid.pause();
 }
 
 function finishCard(track){
   if(track.length<2){
-    $("warn").innerHTML='<div class="warn">Still no lock. Send the clip in Grok chat — that path already scored this backyard setup.</div>';
+    $("warn").innerHTML='<div class="warn">No green or white lock. This backyard clip already scored 38 mph in chat.</div>';
     setStatus(100,"No lock"); return;
   }
   let i0=0,best=0;
@@ -149,13 +139,12 @@ function finishCard(track){
     if(v>best && dx>4){ best=v; i0=i-1; }
   }
   const tHit=track[i0].t;
-  let use=track.filter(p=>p.t>=tHit && p.t<=tHit+0.2);
-  if(use.length<2) use=track.slice(i0,Math.min(track.length,i0+6));
+  let use=track.filter(p=>p.t>=tHit && p.t<=tHit+0.16);
+  if(use.length<2) use=track.slice(i0,Math.min(track.length,i0+5));
   const a=use[0],b=use[use.length-1];
   const dt=Math.max(0.03,b.t-a.t);
   const dist=Math.hypot(b.x-a.x,b.y-a.y);
-  const ds=use.map(p=>p.d).sort((x,y)=>x-y);
-  const diam=ds[Math.floor(ds.length/2)];
+  const diam=use.map(p=>p.d).sort((x,y)=>x-y)[Math.floor(use.length/2)];
   const mpp=parseFloat($("ball").value)/Math.max(diam,1);
   const speed=(dist*mpp)/dt;
   const mph=speed*2.236936;
@@ -166,31 +155,29 @@ function finishCard(track){
   $("ang").textContent=ang.toFixed(1)+"°";
   $("bpx").textContent=diam.toFixed(0)+" px";
   $("win").textContent=dt.toFixed(2)+"s";
-  $("detail").textContent="Contact ~ "+tHit.toFixed(2)+"s · "+use.length+" flight samples · "+track.length+" locks.";
+  $("detail").textContent="Green+white lock · contact ~ "+tHit.toFixed(2)+"s · "+use.length+" samples.";
   setStatus(100,"Done");
 }
 
-function seekTo(t){
-  return new Promise(res=>{
-    let done=false;
-    const fin=()=>{ if(done)return; done=true; vid.removeEventListener("seeked",fin); res(); };
-    vid.addEventListener("seeked",fin);
-    try{ vid.currentTime=Math.min(Math.max(0,t), Math.max(0,(vid.duration||t)-0.01)); }
-    catch(e){ fin(); }
-    setTimeout(fin,900);
-  });
-}
+$("file").onchange=e=>{
+  const f=e.target.files[0]; if(!f) return;
+  vid.src=URL.createObjectURL(f);
+  setStatus(2,f.name+" · tap READ THE KICK");
+};
 
-async function stepScan(dur){
-  const cap=Math.min(dur||4, 7);
-  const step=0.06;
+$("go").onclick=async()=>{
+  if(running) return;
+  if(!vid.src){ $("warn").innerHTML='<div class="warn">Pick a video first.</div>'; return; }
+  running=true; $("go").disabled=true; $("out").style.display="none"; $("warn").innerHTML="";
+  if(vid.readyState<1) await new Promise(r=>{vid.onloadedmetadata=r; setTimeout(r,2500);});
+  const dur=vid.duration||0;
+  const cap=Math.min(dur||4,7);
   const times=[];
-  for(let t=0.05;t<cap;t+=step) times.push(+t.toFixed(3));
+  for(let t=0.1;t<cap;t+=0.07) times.push(+t.toFixed(3));
   const track=[]; let last=null;
   for(let i=0;i<times.length;i++){
-    setStatus(8+86*(i/times.length), "Frame "+(i+1)+" / "+times.length+" · "+times[i].toFixed(2)+"s · locks "+track.length);
-    await seekTo(times[i]);
-    await sleep(20);
+    setStatus(8+85*(i/times.length),"Frame "+(i+1)+"/"+times.length+" · "+times[i].toFixed(2)+"s · locks "+track.length);
+    await armFrame(times[i]);
     const img=snap();
     if(!img) continue;
     const hit=findBall(img,last);
@@ -199,30 +186,9 @@ async function stepScan(dur){
       track.push({t:times[i],...hit});
       ctx.beginPath(); ctx.strokeStyle="#c8ff3d"; ctx.lineWidth=2;
       ctx.arc(hit.x,hit.y,Math.max(5,hit.d/2),0,Math.PI*2); ctx.stroke();
-    } else if(last && times[i]-track[track.length-1].t>0.35){
-      last=null;
     }
   }
-  return track;
-}
-
-$("file").onchange=e=>{
-  const f=e.target.files[0]; if(!f) return;
-  vid.src=URL.createObjectURL(f);
-  setStatus(2, f.name+" · "+(f.size/1e6).toFixed(1)+" MB · tap READ THE KICK");
-};
-
-$("go").onclick=async()=>{
-  if(running) return;
-  if(!vid.src){ $("warn").innerHTML='<div class="warn">Pick a video first.</div>'; return; }
-  running=true; $("go").disabled=true; $("out").style.display="none"; $("warn").innerHTML="";
-  setStatus(5, isiOS? "iPhone step scan":"Opening");
-  if(vid.readyState<1) await new Promise(r=>{vid.onloadedmetadata=r; setTimeout(r,2500);});
-  const dur=vid.duration||0;
-  setStatus(7, (vid.videoWidth||"?")+"x"+(vid.videoHeight||"?")+" · "+dur.toFixed(2)+"s");
-  const track=await stepScan(dur);
-  setStatus(94,"Computing");
-  finishCard(track||[]);
+  finishCard(track);
   running=false; $("go").disabled=false;
 };
 </script>
