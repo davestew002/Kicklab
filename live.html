@@ -39,7 +39,7 @@
       <div class="row">
         <select id="size"><option value="0.205" selected>Size 4</option></select>
         <button class="ghost" id="cam">START CAMERA</button>
-        <button class="go" id="lock">LOCK</button>
+        <button class="ghost" id="lock">LOCK</button>
         <button class="ghost" id="unlock">RECALIBRATE</button>
       </div>
       <div class="prompt" id="prompt">START CAMERA · put the ball in the pink ring</div>
@@ -54,6 +54,19 @@
 <script>
 const vid=$("vid"), cv=$("cv"), ctx=cv.getContext("2d",{willReadFrequently:true});
 function $(id){return document.getElementById(id)}
+
+function drawCover(c, video, W, H, mirror){
+  const vw=video.videoWidth, vh=video.videoHeight;
+  if(!vw) return;
+  const scale=Math.max(W/vw, H/vh);
+  const dw=vw*scale, dh=vh*scale;
+  const ox=(W-dw)/2, oy=(H-dh)/2;
+  c.save();
+  if(mirror){ c.translate(W,0); c.scale(-1,1); c.drawImage(video, W-ox-dw, oy, dw, dh); }
+  else c.drawImage(video, ox, oy, dw, dh);
+  c.restore();
+}
+
 const PINK="#ff2ec8";
 const state={live:false,locked:false,cx:0.74,cy:0.68,r:0.042,gx:0.22,drag:null,lastMph:null,track:[],ready:false,prevData:null,lock:null,flying:false,vx:0,vy:0};
 function resize(){cv.width=innerWidth*devicePixelRatio;cv.height=innerHeight*devicePixelRatio}
@@ -99,46 +112,40 @@ document.addEventListener("touchmove", e=>{
 document.addEventListener("touchend", onUp);
 
 function isBallPix(r,g,b){
-  const grass=g>r+12 && g>b+8 && g>70;
+  const grass=g>r+8 && g>b+6 && g>60 && g<200;
   if(grass) return false;
-  const avg=(r+g+b)/3;
-  const red=r>125 && r>g+15;
-  const white=avg>118 && Math.abs(r-g)<50;
-  const lime=g>120 && g>=r-12 && g>b+8;
-  return white||red||lime||avg>160;
+  return true;
 }
 function blobIn(img, cx,cy, rad){
   const w=img.width,h=img.height,data=img.data;
-  const x0=Math.max(2,(cx-rad)*w|0), x1=Math.min(w-2,(cx+rad)*w|0);
-  const y0=Math.max(2,(cy-rad)*h|0), y1=Math.min(h-2,(cy+rad)*h|0);
-  let sx=0,sy=0,n=0,minx=w,maxx=0,miny=h,maxy=0;
+  const x0=Math.max(1,(cx-rad)*w|0), x1=Math.min(w-1,(cx+rad)*w|0);
+  const y0=Math.max(1,(cy-rad)*h|0), y1=Math.min(h-1,(cy+rad)*h|0);
+  let sx=0,sy=0,n=0,minx=w,maxx=0,miny=h,maxy=0,tot=0;
   for(let y=y0;y<y1;y+=1){
     for(let x=x0;x<x1;x+=1){
       if(Math.hypot(x-cx*w, y-cy*h)>rad*w) continue;
+      tot++;
       const i=(y*w+x)*4;
       if(!isBallPix(data[i],data[i+1],data[i+2])) continue;
       sx+=x;sy+=y;n++;
       if(x<minx)minx=x;if(x>maxx)maxx=x;if(y<miny)miny=y;if(y>maxy)maxy=y;
     }
   }
-  if(n<6) return null;
-  const dw=maxx-minx, dh=maxy-miny, d=Math.max(dw,dh);
-  const minD=Math.max(6, state.r*w*0.18);
-  const maxD=state.lock ? state.r*w*1.3 : state.r*w*0.9;
-  if(d<minD||d>maxD) return null;
-  if(dw>0 && dh>0 && (dw/dh>2.2||dh/dw>2.2)) return null;
-  return {x:sx/n/w,y:sy/n/h,d:d/w};
+  if(n<8) return null;
+  const d=Math.max(4, Math.max(maxx-minx,maxy-miny));
+  return {x:sx/n/w,y:sy/n/h,d:d/w,n,tot};
 }
 function findBall(img){
-  if(state.flying && state.lock){
-    return blobIn(img, state.lock.x, state.lock.y, 0.24);
+  if(state.lock){
+    const px=state.lock.x+(state.vx||0);
+    const py=state.lock.y+(state.vy||0);
+    const near=blobIn(img, px, py, 0.16);
+    if(near) return near;
+    const wider=blobIn(img, px, py, 0.30);
+    if(wider) return wider;
   }
-  const inR=blobIn(img, state.cx, state.cy, state.r*1.08);
+  const inR=blobIn(img, state.cx, state.cy, state.r*1.15);
   if(inR) return Object.assign(inR,{inRing:true});
-  if(state.ready){
-    const midX=(state.cx+state.gx)/2;
-    return blobIn(img, midX, state.cy-0.04, Math.max(0.2, Math.abs(state.cx-state.gx)*0.65));
-  }
   return null;
 }
 function inRing(p){return Math.hypot(p.x-state.cx,p.y-state.cy)<state.r*1.2}
@@ -148,6 +155,8 @@ function draw(hit){
   ctx.clearRect(0,0,w,h);
   ctx.strokeStyle=PINK; ctx.fillStyle=PINK;
   ctx.lineWidth=4*devicePixelRatio;
+  ctx.strokeStyle=state.ready? "#ff2a2a":PINK;
+  ctx.fillStyle=ctx.strokeStyle;
   ctx.setLineDash([14*devicePixelRatio,10*devicePixelRatio]);
   ctx.beginPath(); ctx.arc(state.cx*w,state.cy*h,state.r*w,0,Math.PI*2); ctx.stroke();
   ctx.setLineDash([]);
@@ -158,7 +167,7 @@ function draw(hit){
   ctx.fillText("GATE", state.gx*w+8, 28*devicePixelRatio);
   const L=state.lock||hit;
   if(L){
-    ctx.beginPath(); ctx.strokeStyle="#7dff6a"; ctx.lineWidth=4*devicePixelRatio;
+    ctx.beginPath(); ctx.strokeStyle=state.ready?"#ff2a2a":"#7dff6a"; ctx.lineWidth=4*devicePixelRatio;
     ctx.arc(L.x*w,L.y*h,Math.max(10, (L.d||state.r*0.35)*w*0.55),0,Math.PI*2); ctx.stroke();
   }
 }
@@ -190,36 +199,44 @@ function speedFromTrack(){
 function loop(){
   if(!state.live) return;
   if(vid.videoWidth){
-    const tw=480, th=Math.round(480*vid.videoHeight/vid.videoWidth);
+    const tw=640, th=Math.round(640*cv.height/cv.width);
     const off=document.createElement("canvas"); off.width=tw; off.height=th;
     const o=off.getContext("2d",{willReadFrequently:true});
-    o.save(); o.translate(tw,0); o.scale(-1,1); o.drawImage(vid,0,0,tw,th); o.restore();
+    drawCover(o, vid, tw, th, true);
     const frame=o.getImageData(0,0,tw,th);
     const hit=findBall(frame);
     state.prevData=frame.data;
     const t=performance.now()/1000;
-    if(state.locked){
-      if(hit){
-        if(state.lock){
-          state.vx=hit.x-state.lock.x;
-          state.vy=hit.y-state.lock.y;
-        }
-        state.lock={x:hit.x,y:hit.y,d:hit.d};
-        const inside=inRing(hit);
-        if(inside && !state.flying){
-          state.ready=true;
+    if(hit){
+      if(state.lock){
+        state.vx=hit.x-state.lock.x;
+        state.vy=hit.y-state.lock.y;
+      }
+      state.lock={x:hit.x,y:hit.y,d:hit.d};
+      const inside=inRing(hit);
+      if(inside && !state.flying){
+        state.seen=(state.seen||0)+1;
+        if(state.seen>3){
+          state.locked=true; state.ready=true;
+          $("lock").className="go";
           prompt("LOCKED ON BALL — kick");
-        } else if(state.ready){
-          state.flying=true;
-          state.track.push({t,x:hit.x,y:hit.y});
-          prompt("TRACKING");
-          if(state.track.length>=3) speedFromTrack();
-          if(state.track[0] && t-state.track[0].t>0.30){
-            state.track=[]; state.flying=false; state.ready=true;
-            prompt("LOCKED ON BALL — kick again");
-          }
+        } else {
+          prompt("Ball in ring — locking…");
         }
-      } else if(state.lock && state.ready){
+      } else if(state.ready){
+        state.flying=true;
+        state.track.push({t,x:hit.x,y:hit.y});
+        prompt("TRACKING");
+        if(state.track.length>=3) speedFromTrack();
+        if(state.track[0] && t-state.track[0].t>0.30){
+          state.track=[]; state.flying=false; state.ready=true;
+          prompt("LOCKED ON BALL — kick again");
+        }
+      }
+      state.missT=null;
+    } else {
+      state.seen=0;
+      if(state.lock && state.ready){
         prompt("TRACKING");
         if(!state.missT) state.missT=t;
         if(t-state.missT>0.40){
@@ -227,10 +244,9 @@ function loop(){
           prompt("Lost it — put the ball in the ring");
           state.lock=null; state.ready=false; state.vx=0; state.vy=0;
         }
-      } else {
+      } else if(state.live){
         prompt("Looking for the ball in the ring…");
       }
-      if(hit) state.missT=null;
     }
     draw(hit || state.lock);
   } else draw(null);
@@ -239,8 +255,12 @@ function loop(){
 
 $("cam").onclick=()=>startCam().catch(()=>alert("Allow camera"));
 $("lock").onclick=()=>{
-  if(!state.live) startCam().then(()=>{state.locked=true;prompt("Place the ball in the ring")});
-  else {state.locked=true;prompt("Place the ball in the ring")}
+  const go=()=>{
+    state.locked=true; state.ready=true; state.seen=99;
+    $("lock").className="go";
+    prompt("LOCKED — sensor is live. Kick.");
+  };
+  if(!state.live) startCam().then(go); else go();
 };
 $("unlock").onclick=()=>{
   state.locked=false; state.ready=false; state.track=[]; state.lock=null; state.flying=false;
