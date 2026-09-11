@@ -193,7 +193,7 @@ function ballFeet(){
 }
 function speedFromTrack(){
   const tr=state.track;
-  if(tr.length<3) return;
+  if(tr.length<2) return;
   const toward=state.gx-state.cx;
   const aspect=innerHeight/innerWidth;
   const fpp=ballFeet();
@@ -218,7 +218,7 @@ function speedFromTrack(){
       if(mph>best) best=mph;
     }
   }
-  if(best>=12&&best<=75){
+  if(best>=8&&best<=80){
     flash(best);
     prompt(best.toFixed(0)+" MPH · ball back in the ring");
     state.track=[]; state.ready=false; state.lock=null; state.flying=false; state.vx=0; state.vy=0;
@@ -269,12 +269,27 @@ function loop(){
       state.missT=null;
     } else {
       state.seen=0;
-      if(state.lock && state.ready){
-        prompt("TRACKING");
+      if(state.ready){
+        if(!state.flying){
+          state.flying=true;
+          if(state.lock) state.track.push({t,x:state.lock.x,y:state.lock.y});
+          prompt("TRACKING");
+        }
+        if(state.lock){
+          state.track.push({t,x:state.lock.x+(state.vx||0),y:state.lock.y+(state.vy||0)});
+          if(state.track.length>=2) speedFromTrack();
+        }
         if(!state.missT) state.missT=t;
-        if(t-state.missT>0.40){
+        if(t-state.missT>0.25){
+          if(state.track.length>=2) speedFromTrack();
+          if(state.ready){
+            const fpp=ballFeet();
+            const dt=1/30;
+            const mph=(Math.hypot(state.vx||0,(state.vy||0)*(innerHeight/innerWidth))*fpp/dt)*0.681818;
+            if(mph>=12&&mph<=75) flash(mph);
+            prompt((state.lastMph?state.lastMph.toFixed(0)+" MPH · ":"")+"ball back in the ring");
+          }
           state.flying=false; state.track=[]; state.missT=null;
-          prompt("Lost it — put the ball in the ring");
           state.lock=null; state.ready=false; state.vx=0; state.vy=0;
         }
       } else if(state.live){
