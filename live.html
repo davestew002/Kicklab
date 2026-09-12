@@ -45,7 +45,7 @@
       <div class="row">
         <select id="size"><option selected>Size 4</option></select>
         <button class="ghost" id="cam">START CAMERA</button>
-        <button class="ghost" id="rec">RECORD 4s</button>
+        <button class="ghost" id="rec">RECORD 12s</button>
         <button class="ghost" id="save" disabled>SAVE CLIP</button>
         <label class="btn ghost" for="file">OPEN CLIP</label>
         <input id="file" type="file" accept="video/*"/>
@@ -157,7 +157,7 @@ async function startRec(){
   recorder.onstop = async () => {
     lastBlob = new Blob(chunks, { type: recorder.mimeType || "video/mp4" });
     $("save").disabled = false;
-    $("rec").textContent = "RECORD 4s";
+    $("rec").textContent = "RECORD 12s";
     $("rec").className = "ghost";
     say("Clip saved in memory · reading kick…");
     try { await analyzeBlob(lastBlob); }
@@ -166,9 +166,9 @@ async function startRec(){
   recorder.start(200);
   $("rec").textContent = "RECORDING";
   $("rec").className = "rec";
-  say("Recording 4 seconds — kick now");
+  say("Recording 12 seconds — walk in and kick");
   clearTimeout(recTimer);
-  recTimer = setTimeout(() => { if (recorder && recorder.state==="recording") recorder.stop(); }, 4000);
+  recTimer = setTimeout(() => { if (recorder && recorder.state==="recording") recorder.stop(); }, 12000);
 }
 
 $("cam").onclick = () => startCam().catch(() => say("Allow camera in Safari"));
