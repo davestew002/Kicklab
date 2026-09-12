@@ -1,323 +1,343 @@
 <!DOCTYPE html>
+<!--
+KICKLAB LIVE — single file, iPhone Safari, front camera.
+One job: live speed of a size-4 ball (0.673 ft) using ball diameter as the only scale.
+Flow: start camera → drag pink ring onto ball → auto LOCK when still →
+kick left toward red gate → MPH from mark to tracked flight → re-arm when ball returns.
+No video upload. No MediaRecorder. No leftover builds.
+-->
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"/>
-<title>KICKLAB</title>
+<title>KICKLAB LIVE</title>
 <style>
   :root{--lime:#c8ff3d;--pink:#ff2ec8;--txt:#f4f6fb}
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-  html,body{margin:0;height:100%;background:#05070c;color:var(--txt);font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;overflow:hidden}
-  #stage{position:fixed;inset:0;z-index:1}
+  html,body{margin:0;height:100%;background:#05070c;color:var(--txt);font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;overflow:hidden;touch-action:none}
+  #stage{position:fixed;inset:0}
   video,canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
-  #live{z-index:1;transform:scaleX(-1)}
-  #cv{z-index:2;pointer-events:auto}
+  video{z-index:1;transform:scaleX(-1)}
+  canvas{z-index:2}
   #hud{position:fixed;inset:0;z-index:3;pointer-events:none}
   #hud *{pointer-events:auto}
   .top{position:absolute;top:calc(6px + env(safe-area-inset-top));left:10px;right:10px}
   .brand{letter-spacing:.28em;font-size:10px;color:var(--lime);font-weight:700}
-  .panel{background:rgba(8,10,16,.86);border:1px solid #2a3348;border-radius:14px;padding:8px 10px;margin-top:6px;backdrop-filter:blur(10px);max-width:92vw}
+  .panel{background:rgba(8,10,16,.82);border:1px solid #2a3348;border-radius:14px;padding:8px 10px;margin-top:6px;backdrop-filter:blur(10px);max-width:70vw}
   .row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px}
-  select,button,label.btn{border:0;border-radius:10px;padding:8px 10px;font:inherit;font-weight:800;display:inline-block}
-  select{background:#0c0f16;color:var(--txt);border:1px solid #2a3348;font-weight:600}
+  button{border:0;border-radius:10px;padding:8px 10px;font:inherit;font-weight:800}
   .go{background:var(--lime);color:#111}
-  .rec{background:#ff2a2a;color:#fff}
   .ghost{background:#0c0f16;color:var(--txt);border:1px solid #2a3348}
   .prompt{margin-top:6px;font-size:15px;font-weight:800;color:var(--lime)}
   .mphwrap{position:absolute;right:14px;bottom:calc(10px + env(safe-area-inset-bottom));text-align:right;pointer-events:none}
   .mph{font-size:84px;font-weight:800;letter-spacing:-.06em;line-height:.85;text-shadow:0 8px 30px #000}
   .mph span{font-size:16px;color:var(--lime);margin-left:6px}
+  .arrow{font-size:80px;line-height:.7}
+  .up{color:#7dff6a}.down{color:#ff4d4d}.same{color:#e6c35a}
   .sub{color:#d7dce8;font-size:13px}
-  #file{display:none}
-  .dot{width:10px;height:10px;border-radius:50%;background:#ff2a2a;display:inline-block;margin-right:6px;animation:blink 1s infinite}
-  @keyframes blink{50%{opacity:.3}}
 </style>
 </head>
 <body>
 <div id="stage">
-  <video id="live" playsinline muted autoplay></video>
+  <video id="vid" playsinline muted autoplay></video>
   <canvas id="cv"></canvas>
 </div>
 <div id="hud">
   <div class="top">
-    <div class="brand">KICKLAB</div>
+    <div class="brand">KICKLAB LIVE</div>
     <div class="panel">
       <div class="row">
-        <select id="size"><option selected>Size 4</option></select>
         <button class="ghost" id="cam">START CAMERA</button>
-        <button class="ghost" id="rec">RECORD 12s</button>
-        <button class="ghost" id="save" disabled>SAVE CLIP</button>
-        <label class="btn ghost" for="file">OPEN CLIP</label>
-        <input id="file" type="file" accept="video/*"/>
+        <button class="ghost" id="lock">LOCK</button>
+        <button class="ghost" id="unlock">RECALIBRATE</button>
       </div>
-      <div class="prompt" id="prompt">START CAMERA or OPEN CLIP from Files</div>
+      <div class="prompt" id="prompt">START CAMERA · drag the ring onto the ball</div>
     </div>
   </div>
   <div class="mphwrap">
+    <div class="arrow same" id="arrow">→</div>
     <div class="mph" id="mph">—<span>MPH</span></div>
-    <div class="sub" id="meta">Record the kick · then it reads the file</div>
+    <div class="sub" id="meta">Size 4 · live</div>
   </div>
 </div>
 <script>
 const $ = id => document.getElementById(id);
-const live = $("live");
-const cv = $("cv");
-const ctx = cv.getContext("2d");
-const BALL_M = 0.205;
+const vid = $("vid"), cv = $("cv");
+const ctx = cv.getContext("2d", { willReadFrequently:true });
+const buf = document.createElement("canvas");
+const btx = buf.getContext("2d", { willReadFrequently:true });
+const AW = 400;
 const BALL_FT = 0.673;
+const PINK = "#ff2ec8";
 
-let stream = null;
-let recorder = null;
-let chunks = [];
-let lastBlob = null;
-let recTimer = null;
-let ringX = 0.72, ringY = 0.70, ringR = 0.045;
-let drag = false, lastY = 0;
+const S = {
+  live:false, phase:"off",
+  cx:0.74, cy:0.70, r:0.040, gx:0.20,
+  drag:false, quiet:0,
+  still:0, miss:0,
+  mark:null, path:[],
+  lastMph:null, lastY:0
+};
 
 function say(t){ $("prompt").textContent = t; }
+function clearMph(){
+  $("mph").innerHTML = "—<span>MPH</span>";
+  $("arrow").textContent = "→";
+  $("arrow").className = "arrow same";
+}
 function fit(){
   cv.width = innerWidth * devicePixelRatio;
   cv.height = innerHeight * devicePixelRatio;
 }
 addEventListener("resize", fit); fit();
 
-function overlay(){
-  const w=cv.width,h=cv.height;
-  ctx.clearRect(0,0,w,h);
-  ctx.strokeStyle="#ff2ec8";
-  ctx.lineWidth=4*devicePixelRatio;
-  ctx.setLineDash([12*devicePixelRatio,8*devicePixelRatio]);
-  ctx.beginPath();
-  ctx.arc(w*ringX, h*ringY, w*ringR, 0, Math.PI*2);
-  ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.fillStyle="#ff2ec8";
-  ctx.font=(12*devicePixelRatio)+"px sans-serif";
-  ctx.fillText("TEE", w*ringX-14, h*ringY-w*ringR-8);
+function drawCover(c,w,h){
+  const vw=vid.videoWidth, vh=vid.videoHeight;
+  if(!vw) return;
+  const s=Math.max(w/vw,h/vh);
+  const dw=vw*s, dh=vh*s;
+  c.save(); c.translate(w,0); c.scale(-1,1);
+  c.drawImage(vid,(w-dw)/2,(h-dh)/2,dw,dh);
+  c.restore();
 }
-function loop(){ overlay(); requestAnimationFrame(loop); }
-
-function pt(e){
-  const ev = e.touches ? e.touches[0] : e;
-  return { x: ev.clientX / innerWidth, y: ev.clientY / innerHeight };
-}
-cv.addEventListener("pointerdown", e => {
-  const p = pt(e);
-  if (Math.hypot(p.x - ringX, p.y - ringY) < ringR + 0.10){
-    drag = true; lastY = p.y;
-    try { cv.setPointerCapture(e.pointerId); } catch(_){}
-    e.preventDefault();
-  }
-});
-cv.addEventListener("pointermove", e => {
-  if (!drag) return;
-  const p = pt(e);
-  ringY = Math.min(0.92, Math.max(0.38, ringY + (p.y - lastY)));
-  lastY = p.y;
-});
-cv.addEventListener("pointerup", () => { drag = false; });
-cv.addEventListener("pointercancel", () => { drag = false; });
-
-function mime(){
-  const opts = [
-    "video/mp4",
-    "video/mp4;codecs=avc1",
-    "video/webm;codecs=vp8",
-    "video/webm"
-  ];
-  return opts.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || "";
+function snap(){
+  const th=Math.max(180, Math.round(AW*cv.height/cv.width));
+  if(buf.width!==AW||buf.height!==th){ buf.width=AW; buf.height=th; }
+  drawCover(btx,AW,th);
+  return btx.getImageData(0,0,AW,th);
 }
 
-async function startCam(){
-  stream = await navigator.mediaDevices.getUserMedia({
-    audio:false,
-    video:{ facingMode:"user", width:{ideal:1920}, height:{ideal:1080}, frameRate:{ideal:60} }
-  });
-  live.srcObject = stream;
-  await live.play();
-  $("cam").textContent="CAMERA ON";
-  $("cam").className="go";
-  say("Frame the ball in the pink tee · tap RECORD · then kick");
-  loop();
-}
-
-function recName(){
-  const d=new Date();
-  const p=n=>String(n).padStart(2,"0");
-  return "kicklab-"+d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+"-"+p(d.getHours())+p(d.getMinutes())+p(d.getSeconds());
-}
-
-async function startRec(){
-  if (!stream) await startCam();
-  chunks = [];
-  const type = mime();
-  recorder = type ? new MediaRecorder(stream, { mimeType:type, videoBitsPerSecond:8_000_000 })
-                  : new MediaRecorder(stream);
-  recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
-  recorder.onstop = async () => {
-    lastBlob = new Blob(chunks, { type: recorder.mimeType || "video/mp4" });
-    $("save").disabled = false;
-    $("rec").textContent = "RECORD 12s";
-    $("rec").className = "ghost";
-    say("Clip saved in memory · reading kick…");
-    try { await analyzeBlob(lastBlob); }
-    catch(err){ say("Could not read clip — SAVE it and OPEN CLIP"); console.error(err); }
-  };
-  recorder.start(200);
-  $("rec").textContent = "RECORDING";
-  $("rec").className = "rec";
-  say("Recording 12 seconds — walk in and kick");
-  clearTimeout(recTimer);
-  recTimer = setTimeout(() => { if (recorder && recorder.state==="recording") recorder.stop(); }, 12000);
-}
-
-$("cam").onclick = () => startCam().catch(() => say("Allow camera in Safari"));
-$("rec").onclick = () => {
-  if (recorder && recorder.state==="recording"){ recorder.stop(); return; }
-  startRec().catch(() => say("Recording not allowed in this Safari"));
-};
-$("save").onclick = async () => {
-  if (!lastBlob) return;
-  const ext = (lastBlob.type||"").includes("webm") ? "webm" : "mp4";
-  const file = new File([lastBlob], recName()+"."+ext, { type:lastBlob.type||"video/mp4" });
-  if (navigator.canShare && navigator.canShare({ files:[file] })){
-    try { await navigator.share({ files:[file], title:"Kicklab clip" }); say("Clip shared to Files / Photos"); return; } catch(e){}
-  }
-  const a=document.createElement("a");
-  a.href=URL.createObjectURL(lastBlob);
-  a.download=file.name;
-  a.click();
-  say("Save the clip from the share sheet");
-};
-$("file").onchange = async e => {
-  const f=e.target.files && e.target.files[0];
-  if (!f) return;
-  lastBlob=f;
-  $("save").disabled=false;
-  say("Reading "+f.name+"…");
-  try { await analyzeBlob(f); }
-  catch(err){ say("Could not decode that file"); }
-};
-
-function isGrass(r,g,b){ return g>r+12 && g>b+8 && g>45; }
+function isGrass(r,g,b){ return g>r+14 && g>b+8 && g>48; }
 function isSkin(r,g,b){
-  return r>80 && g>45 && r>b+8 && r-g<55 && g-b<45 && (r+g+b)/3<175;
+  return r>85 && g>50 && r>b+6 && Math.abs(r-g)<50 && (r+g+b)/3<170;
 }
 function isBall(r,g,b){
-  if (isGrass(r,g,b)||isSkin(r,g,b)) return false;
+  if(isGrass(r,g,b) || isSkin(r,g,b)) return false;
   const lum=(r+g+b)/3;
-  if (lum>=160) return true;
-  if (r>140 && r>g+24 && r>b+14) return true;
+  if(lum>158) return true;
+  if(r>148 && r>g+26 && r>b+16) return true;
   return false;
 }
 
-function findBall(img){
+function blobAt(img, x0,x1,y0,y1){
   const {data,width:w,height:h}=img;
-  let best=null,bestN=18;
+  const xa=Math.max(1,(x0*w)|0), xb=Math.min(w-1,(x1*w)|0);
+  const ya=Math.max(1,(y0*h)|0), yb=Math.min(h-1,(y1*h)|0);
+  let best=null, bestN=14;
   const step=4;
-  for (let y=2;y<h-2;y+=step){
-    for (let x=2;x<w-2;x+=step){
+  for(let y=ya;y<yb;y+=step){
+    for(let x=xa;x<xb;x+=step){
       const i=(y*w+x)*4;
-      if (!isBall(data[i],data[i+1],data[i+2])) continue;
+      if(!isBall(data[i],data[i+1],data[i+2])) continue;
       let n=0,sx=0,sy=0,minx=w,maxx=0,miny=h,maxy=0;
-      const R=14;
-      for (let yy=y-R;yy<=y+R;yy+=2){
-        if (yy<1||yy>=h-1) continue;
-        for (let xx=x-R;xx<=x+R;xx+=2){
-          if (xx<1||xx>=w-1) continue;
+      const R=11;
+      for(let yy=y-R;yy<=y+R;yy+=2){
+        if(yy<1||yy>=h-1) continue;
+        for(let xx=x-R;xx<=x+R;xx+=2){
+          if(xx<1||xx>=w-1) continue;
           const j=(yy*w+xx)*4;
-          if (!isBall(data[j],data[j+1],data[j+2])) continue;
+          if(!isBall(data[j],data[j+1],data[j+2])) continue;
           n++; sx+=xx; sy+=yy;
-          if (xx<minx)minx=xx; if(xx>maxx)maxx=xx;
-          if (yy<miny)miny=yy; if(yy>maxy)maxy=yy;
+          if(xx<minx)minx=xx; if(xx>maxx)maxx=xx;
+          if(yy<miny)miny=yy; if(yy>maxy)maxy=yy;
         }
       }
-      if (n<=bestN) continue;
-      const dw=(maxx-minx), dh=(maxy-miny);
+      if(n<=bestN) continue;
+      const dw=(maxx-minx)/w, dh=(maxy-miny)/h;
       const d=Math.max(dw,dh);
-      if (d<8 || d>w*0.22) continue;
-      const asp=dw>dh?dw/Math.max(dh,1):dh/Math.max(dw,1);
-      if (asp>1.55) continue;
+      if(d<0.016||d>0.10) continue;
+      const asp=dw>dh?dw/Math.max(dh,.001):dh/Math.max(dw,.001);
+      if(asp>1.5) continue;
       bestN=n;
-      best={x:sx/n,y:sy/n,d,n};
+      best={n,x:sx/n/w,y:sy/n/h,d};
     }
   }
   return best;
 }
-
-function grab(video, w){
-  const h=Math.round(w*video.videoHeight/video.videoWidth);
-  const c=document.createElement("canvas");
-  c.width=w; c.height=h;
-  const g=c.getContext("2d");
-  g.drawImage(video,0,0,w,h);
-  return g.getImageData(0,0,w,h);
+function inRing(img){
+  const p=S.r*1.2;
+  return blobAt(img, S.cx-p, S.cx+p, S.cy-p*1.3, S.cy+p*1.3);
+}
+function inFlight(img){
+  const x1=S.mark ? S.mark.x-0.04 : S.cx-0.04;
+  return blobAt(img, 0.02, x1, 0.34, 0.92);
 }
 
-function waitSeek(video, t){
-  return new Promise((res,rej)=>{
-    const to=setTimeout(()=>rej(new Error("seek")), 1500);
-    const on=()=>{ video.removeEventListener("seeked", on); clearTimeout(to); res(); };
-    video.addEventListener("seeked", on);
-    video.currentTime=Math.min(Math.max(0,t), Math.max(0, video.duration-0.001));
-  });
+function publish(mph){
+  mph=Math.round(mph);
+  $("mph").innerHTML=mph+"<span>MPH</span>";
+  const el=$("arrow");
+  if(S.lastMph==null){ el.textContent="→"; el.className="arrow same"; }
+  else if(mph>S.lastMph+1){ el.textContent="↑"; el.className="arrow up"; }
+  else if(mph<S.lastMph-1){ el.textContent="↓"; el.className="arrow down"; }
+  else { el.textContent="→"; el.className="arrow same"; }
+  S.lastMph=mph;
+  $("meta").textContent="Size 4 · live";
+  say(mph+" MPH · ball back on the tee");
+  S.phase="done";
 }
 
-async function analyzeBlob(blob){
-  const url=URL.createObjectURL(blob);
-  const v=document.createElement("video");
-  v.muted=true; v.playsInline=true; v.preload="auto"; v.src=url;
-  await new Promise((res,rej)=>{
-    v.onloadedmetadata=res; v.onerror=()=>rej(new Error("meta"));
-  });
-  const dur=v.duration || 4;
-  const fpsGuess = dur<=6 ? 30 : 24;
-  const step=Math.max(1/60, 1/fpsGuess);
-  const samples=[];
-  say("Scanning "+dur.toFixed(1)+"s clip…");
-  for (let t=0; t<dur-0.001; t+=step){
-    try{ await waitSeek(v,t); } catch(e){ continue; }
-    if (!v.videoWidth) continue;
-    const img=grab(v, 640);
-    const b=findBall(img);
-    if (b) samples.push({t, x:b.x, y:b.y, d:b.d, w:img.width, h:img.height});
-  }
-  URL.revokeObjectURL(url);
-  if (samples.length<3){
-    say("No ball found in the clip — white/red size 4, side-on");
-    return;
-  }
-  const ds=samples.map(s=>s.d).sort((a,b)=>a-b);
-  const mid=ds[ds.length>>1];
-  const mpp=BALL_M/mid;
-  let kickI=0;
-  let bestV=-1;
-  for (let i=1;i<samples.length;i++){
-    const dt=samples[i].t-samples[i-1].t;
-    if (dt<=0||dt>0.2) continue;
-    const dx=samples[i-1].x-samples[i].x;
-    const vpx=dx/dt;
-    if (dx>8 && vpx>bestV){ bestV=vpx; kickI=i-1; }
-  }
-  const win=samples.slice(kickI, Math.min(samples.length, kickI+8)).filter(s=>s.t-samples[kickI].t<=0.25);
-  if (win.length<2){
-    say("Saw the ball, not a kick — try a full strike across the frame");
-    return;
-  }
-  const a=win[0], b=win[win.length-1];
+function score(){
+  const p=S.path;
+  if(!S.mark || p.length<2) return false;
+  const a=p[0], b=p[p.length-1];
   const dt=b.t-a.t;
-  const distM=Math.hypot(b.x-a.x, b.y-a.y)*mpp;
-  const mps=distM/dt;
-  const mph=mps*2.23694;
-  if (dt<0.04 || mph<6 || mph>70){
-    say("Untrusted "+Math.round(mph)+" — clip needs the ball moving left across frame");
-    return;
-  }
-  $("mph").innerHTML=Math.round(mph)+"<span>MPH</span>";
-  $("meta").textContent=win.length+" hits · "+(dt*1000|0)+" ms · ball "+Math.round(mid)+"px";
-  say(Math.round(mph)+" MPH · SAVE CLIP if you want the file");
+  if(dt<0.08 || dt>0.55) return false;
+  if(b.x > S.mark.x-0.10) return false;
+  const aspect=innerHeight/innerWidth;
+  const fpp=BALL_FT/Math.max(S.mark.d||0.04,0.018);
+  const dist=Math.hypot(b.x-S.mark.x,(b.y-S.mark.y)*aspect)*fpp;
+  if(dist<1.8) return false;
+  const mph=(dist/dt)*0.681818;
+  if(mph<10 || mph>62) return false;
+  publish(mph);
+  return true;
 }
 
+function draw(hit){
+  const w=cv.width,h=cv.height;
+  ctx.clearRect(0,0,w,h);
+  const armed=S.phase==="mark"||S.phase==="fly";
+  ctx.strokeStyle=armed?"#ff2a2a":PINK;
+  ctx.fillStyle=ctx.strokeStyle;
+  ctx.lineWidth=4*devicePixelRatio;
+  ctx.setLineDash([14*devicePixelRatio,10*devicePixelRatio]);
+  ctx.beginPath(); ctx.arc(S.cx*w,S.cy*h,S.r*w,0,Math.PI*2); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.font=(12*devicePixelRatio)+"px sans-serif";
+  ctx.fillText("SIZE 4", S.cx*w-22, S.cy*h-S.r*w-8);
+  ctx.lineWidth=5*devicePixelRatio;
+  ctx.beginPath(); ctx.moveTo(S.gx*w,0); ctx.lineTo(S.gx*w,h); ctx.stroke();
+  ctx.fillText("GATE", S.gx*w+8, 26*devicePixelRatio);
+  if(hit){
+    ctx.strokeStyle=armed?"#ff2a2a":"#7dff6a";
+    ctx.beginPath();
+    ctx.arc(hit.x*w,hit.y*h,Math.max(8,(hit.d||0.03)*w*0.5),0,Math.PI*2);
+    ctx.stroke();
+  }
+}
+
+function loop(){
+  if(!S.live) return;
+  if(!vid.videoWidth){ requestAnimationFrame(loop); return; }
+  const img=snap();
+  const t=performance.now()/1000;
+  const quiet=S.drag || performance.now()<S.quiet;
+  const ring=inRing(img);
+
+  if(quiet){ draw(ring); requestAnimationFrame(loop); return; }
+
+  if(S.phase==="done"){
+    if(ring && ring.n>16){
+      S.phase="seek"; S.still=0; S.miss=0; S.path=[];
+      say("Ball in ring — hold still");
+    }
+    draw(ring); requestAnimationFrame(loop); return;
+  }
+
+  if(S.phase==="fly"){
+    const air=inFlight(img);
+    if(air) S.path.push({t,x:air.x,y:air.y});
+    if(S.path.length>=2 && (t-S.path[0].t)>=0.10){
+      if(score()){ draw(air); requestAnimationFrame(loop); return; }
+    }
+    if(t-(S.path[0]?S.path[0].t:t) > 0.70){
+      say("Missed it — ball back on the tee");
+      S.phase="done";
+    }
+    draw(air); requestAnimationFrame(loop); return;
+  }
+
+  if(S.phase==="mark"){
+    if(ring){
+      S.miss=0;
+      S.mark={x:ring.x,y:ring.y,d:ring.d,t};
+      say("ON THE MARK — kick when ready");
+      draw(ring);
+    } else {
+      S.miss++;
+      if(S.miss>=2){
+        S.phase="fly";
+        S.path=[{t,x:S.mark.x,y:S.mark.y}];
+        say("KICK — tracking");
+      }
+      draw(null);
+    }
+    requestAnimationFrame(loop); return;
+  }
+
+  if(S.phase==="seek"){
+    if(ring){
+      const moved=S.lastY && Math.abs(ring.y-S.lastY)>0.025;
+      S.still=moved?0:S.still+1;
+      S.lastY=ring.y;
+      if(S.still>=5){
+        S.mark={x:ring.x,y:ring.y,d:ring.d,t};
+        S.phase="mark"; S.miss=0;
+        $("lock").className="go";
+        clearMph();
+        say("ON THE MARK — kick when ready");
+      } else say("Ball in ring — hold still");
+    } else {
+      S.still=0; say("Looking for the ball in the ring…");
+    }
+    draw(ring);
+  }
+  requestAnimationFrame(loop);
+}
+
+function startCam(){
+  if(S.live) return;
+  navigator.mediaDevices.getUserMedia({
+    audio:false,
+    video:{ facingMode:"user", width:{ideal:1280}, height:{ideal:720} }
+  }).then(s=>{ vid.srcObject=s; return vid.play(); })
+    .then(()=>{
+      S.live=true; S.phase="seek";
+      $("cam").textContent="CAMERA ON"; $("cam").className="go";
+      say("Looking for the ball in the ring…");
+      loop();
+    }).catch(()=>say("Allow camera in Safari"));
+}
+function reset(){
+  S.phase=S.live?"seek":"off";
+  S.still=0; S.miss=0; S.mark=null; S.path=[];
+  $("lock").className="ghost";
+  clearMph();
+  say(S.live?"Looking for the ball in the ring…":"START CAMERA");
+}
+
+$("cam").onclick=startCam;
+$("unlock").onclick=reset;
+$("lock").onclick=()=>{
+  if(!S.live){ startCam(); return; }
+  const ring=inRing(snap());
+  if(!ring){ say("No ball in the ring — drag it onto the ball"); return; }
+  S.mark={x:ring.x,y:ring.y,d:ring.d,t:performance.now()/1000};
+  S.phase="mark"; S.miss=0;
+  $("lock").className="go";
+  clearMph();
+  say("ON THE MARK — kick when ready");
+};
+
+function pt(e){ const t=e.touches?e.touches[0]:e; return {x:t.clientX/innerWidth,y:t.clientY/innerHeight}; }
+cv.addEventListener("pointerdown", e=>{
+  const p=pt(e);
+  if(Math.hypot(p.x-S.cx,p.y-S.cy)<S.r+0.09){
+    S.drag="ring"; S.quiet=performance.now()+700;
+    try{cv.setPointerCapture(e.pointerId)}catch(_){}
+  } else if(Math.abs(p.x-S.gx)<0.07) S.drag="gate";
+});
+addEventListener("pointermove", e=>{
+  if(!S.drag) return;
+  const p=pt(e);
+  if(S.drag==="ring") S.cy=Math.min(0.92,Math.max(0.40,p.y));
+  if(S.drag==="gate") S.gx=Math.min(0.40,Math.max(0.08,p.x));
+});
+addEventListener("pointerup", ()=>{
+  if(S.drag) S.quiet=performance.now()+700;
+  S.drag=false;
+});
 </script>
 </body>
 </html>
