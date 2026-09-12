@@ -114,8 +114,9 @@ function isSkin(r,g,b){
 function isBall(r,g,b){
   if(isGrass(r,g,b) || isSkin(r,g,b)) return false;
   const lum=(r+g+b)/3;
-  if(lum>158) return true;
-  if(r>148 && r>g+26 && r>b+16) return true;
+  if(lum>145) return true;                 // white panel
+  if(r>140 && r>g+22 && r>b+12) return true; // red panel
+  if(lum<80 && Math.abs(r-g)<28 && Math.abs(g-b)<28) return true; // black panel
   return false;
 }
 
@@ -155,12 +156,20 @@ function blobAt(img, x0,x1,y0,y1){
   return best;
 }
 function inRing(img){
-  const p=S.r*1.2;
-  return blobAt(img, S.cx-p, S.cx+p, S.cy-p*1.3, S.cy+p*1.3);
+  const p=S.r*1.45;
+  return blobAt(img, S.cx-p, S.cx+p, S.cy-p*1.4, S.cy+p*1.4);
 }
 function inFlight(img){
-  const x1=S.mark ? S.mark.x-0.04 : S.cx-0.04;
-  return blobAt(img, 0.02, x1, 0.34, 0.92);
+  if(!S.mark) return null;
+  const x0 = S.gx + 0.04;
+  const x1 = S.mark.x - 0.10;
+  if(x1<=x0) return null;
+  const y0 = S.mark.y - 0.10;
+  const y1 = S.mark.y + 0.12;
+  const hit = blobAt(img, x0, x1, y0, y1);
+  if(!hit) return null;
+  if(S.mark.d && Math.abs(hit.d - S.mark.d)/S.mark.d > 0.7) return null;
+  return hit;
 }
 
 function publish(mph){
@@ -256,9 +265,11 @@ function loop(){
       draw(ring);
     } else {
       S.miss++;
-      if(S.miss>=2){
+      if(S.miss>=4){
+        const air=inFlight(img);
+        if(!air){ draw(null); requestAnimationFrame(loop); return; }
         S.phase="fly";
-        S.path=[{t,x:S.mark.x,y:S.mark.y}];
+        S.path=[{t,x:S.mark.x,y:S.mark.y},{t,x:air.x,y:air.y}];
         say("KICK — tracking");
       }
       draw(null);
