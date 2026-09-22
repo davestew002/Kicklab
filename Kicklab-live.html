@@ -34,6 +34,8 @@ Scale = size-4 diameter (0.673 ft), or a default if the ball was not measured.
   .arrow{font-size:12vh;line-height:.7}
   .up{color:#7dff6a}.down{color:#ff4d4d}.same{color:#e6c35a}
   .sub{color:#d7dce8;font-size:13px}
+  .kickmark{position:absolute;left:18px;top:42%;transform:translateY(-50%);font-size:18vh;font-weight:800;letter-spacing:.12em;color:#fff;opacity:.18;pointer-events:none;text-shadow:none}
+  .kickmark.on{opacity:.32}
 </style>
 </head>
 <body>
@@ -53,6 +55,7 @@ Scale = size-4 diameter (0.673 ft), or a default if the ball was not measured.
       <div class="prompt" id="prompt">START CAMERA · drag the white line · tap ARM LINE</div>
     </div>
   </div>
+  <div class="kickmark" id="kickmark">KICK</div>
   <div class="mphwrap">
     <div class="arrow same" id="arrow">→</div>
     <div class="mph" id="mph">—<span>MPH</span></div>
@@ -138,12 +141,12 @@ function motionHit(prev, curr){
       if(y<miny)miny=y; if(y>maxy)maxy=y;
     }
   }
-  if(n<10) return null;
+  if(n<14) return null;
   const dw=(maxx-minx)/w, dh=(maxy-miny)/h;
-  if(dh>0.28) return null;
+  if(dh>0.22) return null;
   if(dw>0.22) return null;
   const asp = dh/Math.max(dw,0.001);
-  if(asp>2.1) return null;
+  if(asp>1.7) return null;
   return {x:(sx/n)/w, y:(sy/n)/h, d:Math.max(dw,dh,0.03), n};
 }
 
@@ -157,7 +160,7 @@ function publish(mph){
   else { el.textContent="→"; el.className="arrow same"; }
   S.lastMph=mph;
   $("meta").textContent="Size 4 · line trap";
-  say(mph+" MPH · tap ARM LINE for the next kick");
+  say(mph+" MPH");
   S.phase="done";
   S.cool=performance.now()+2200;
   S.path=[];
@@ -179,7 +182,7 @@ function scorePath(){
   const dist=Math.hypot(left,(b.y-a.y)*aspect)*fpp;
   if(dist<1.0) return false;
   const mph=(dist/dt)*0.681818;
-  if(mph<14 || mph>62) return false;
+  if(mph<8 || mph>62) return false;
   publish(mph);
   return true;
 }
@@ -233,8 +236,16 @@ function loop(){
 
   if(frozen()){ S.prev=img; return; }
 
+  const mark=$("kickmark");
+  if(mark) mark.className = "kickmark" + ((S.phase==="armed"||S.phase==="fly")?" on":"");
+
   if(S.phase==="done"){
-    if(performance.now()>S.cool) say(S.lastMph? (S.lastMph+" MPH · tap ARM LINE for the next kick") : "Tap ARM LINE");
+    if(performance.now()>S.cool){
+      S.phase="armed";
+      S.path=[];
+      $("arm").className="go";
+      say("READY TO KICK");
+    }
     S.prev=img; return;
   }
 
